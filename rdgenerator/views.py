@@ -1,7 +1,7 @@
 import io
 from pathlib import Path
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.core.files.base import ContentFile
 import os
 import re
@@ -262,26 +262,81 @@ def check_for_file(request):
     uuid = request.GET['uuid']
     platform = request.GET['platform']
     gh_run = GithubRun.objects.filter(Q(uuid=uuid)).first()
-    status = gh_run.status
+    status = gh_run.status if gh_run else "Unknown"
 
-    #if file_exists:
+    # 首先尝试从GitHub Releases获取下载链接
+    if platform == 'android':
+        download_url = check_github_releases(uuid, filename)
+        if download_url:
+            return render(request, 'generated.html', {
+                'filename': filename, 
+                'uuid': uuid, 
+                'platform': platform,
+                'download_url': download_url,
+                'use_github_releases': True
+            })
+    
+    # 如果GitHub Releases不可用，使用传统方式
     if status == "Success":
         return render(request, 'generated.html', {'filename': filename, 'uuid':uuid, 'platform':platform})
     else:
         return render(request, 'waiting.html', {'filename':filename, 'uuid':uuid, 'status':status, 'platform':platform})
 
+def check_github_releases(uuid, filename):
+    """检查GitHub Releases获取下载链接"""
+    try:
+        # 构建GitHub API URL
+        api_url = f"https://api.github.com/repos/{_settings.GHUSER}/{_settings.REPONAME}/releases"
+        
+        headers = {
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28'
+        }
+        
+        if hasattr(_settings, 'GHBEARER') and _settings.GHBEARER:
+            headers['Authorization'] = f'Bearer {_settings.GHBEARER}'
+        
+        response = requests.get(api_url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            releases = response.json()
+            
+            # 查找匹配的release
+            for release in releases:
+                if uuid in release['tag_name']:
+                    # 查找APK文件
+                    for asset in release['assets']:
+                        if asset['name'].endswith('.apk'):
+                            return asset['browser_download_url']
+                            
+    except Exception as e:
+        print(f"Error checking GitHub releases: {e}")
+    
+    return None
+
 def download(request):
     filename = request.GET['filename']
     uuid = request.GET['uuid']
-    #filename = filename+".exe"
+    platform = request.GET.get('platform', 'unknown')
+    
+    # 如果是Android平台，优先从GitHub Releases下载
+    if platform == 'android':
+        download_url = check_github_releases(uuid, filename)
+        if download_url:
+            # 重定向到GitHub Releases下载
+            return redirect(download_url)
+    
+    # 传统下载方式（本地文件）
     file_path = os.path.join('exe',uuid,filename)
-    with open(file_path, 'rb') as file:
-        response = HttpResponse(file, headers={
-            'Content-Type': 'application/vnd.microsoft.portable-executable',
-            'Content-Disposition': f'attachment; filename="{filename}"'
-        })
-
-    return response
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as file:
+            response = HttpResponse(file, headers={
+                'Content-Type': 'application/vnd.microsoft.portable-executable',
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            })
+        return response
+    else:
+        return HttpResponse("File not found", status=404)
 
 def get_png(request):
     filename = request.GET['filename']

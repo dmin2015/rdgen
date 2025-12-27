@@ -573,41 +573,42 @@ jobs:
           # override default build-tools version (29.0.3) -- optional
           BUILD_TOOLS_VERSION: "30.0.2"
 
-      - name: send file to rdgen server
-        if: ${{ fromJson(inputs.extras).rdgen == 'true' }}
+      - name: Upload APK to GitHub Releases
+        if: always()
         shell: bash
         run: |
-          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./signed-apk/${{ inputs.filename }}-${{ matrix.job.arch }}.apk" -F "uuid=${{ inputs.uuid }}" ${{ secrets.GENURL }}/save_custom_client
+          # 创建GitHub Release并上传APK文件
+          gh release create "${{ inputs.uuid }}-${{ matrix.job.arch }}" \
+            "./signed-apk/${{ inputs.filename }}-${{ matrix.job.arch }}.apk" \
+            --title "Custom Build ${{ inputs.uuid }}-${{ matrix.job.arch }}" \
+            --notes "Custom RustDesk build for ${{ inputs.appname }}\nUUID: ${{ inputs.uuid }}\nArchitecture: ${{ matrix.job.arch }}" \
+            --repo ${{ github.repository }} \
+            || echo "Release might already exist, continuing..."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: send file to api server
-        if: ${{ fromJson(inputs.extras).rdgen == 'false' }}
+      - name: Report Success Status
+        if: success()
         shell: bash
         run: |
-          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./signed-apk/${{ inputs.filename }}-${{ matrix.job.arch }}.apk" ${{ inputs.apiServer }}/api/save_custom_client
+          echo "Build completed successfully!"
+          echo "Download URL: https://github.com/${{ github.repository }}/releases/download/${{ inputs.uuid }}-${{ matrix.job.arch }}/${{ inputs.filename }}-${{ matrix.job.arch }}.apk"
+          echo "UUID: ${{ inputs.uuid }}"
+          echo "Architecture: ${{ matrix.job.arch }}"
+          echo "App Name: ${{ inputs.appname }}"
 
-      - name: Report Status
-        uses: fjogeleit/http-request-action@v1
-        continue-on-error: true
-        with:
-          url: ${{ env.STATUS_URL }}
-          method: 'POST'
-          customHeaders: '{"Content-Type": "application/json"}'
-          data: '{"uuid": "${{ inputs.uuid }}", "status": "Success"}'
-
-      - name: failed
+      - name: Report Failure Status
         if: failure()
-        uses: fjogeleit/http-request-action@v1
-        with:
-          url: ${{ env.STATUS_URL }}
-          method: 'POST'
-          customHeaders: '{"Content-Type": "application/json"}'
-          data: '{"uuid": "${{ inputs.uuid }}", "status": "Generation failed, try again"}'
+        shell: bash
+        run: |
+          echo "Build failed!"
+          echo "UUID: ${{ inputs.uuid }}"
+          echo "Please check the build logs above for error details."
 
-      - name: failed
+      - name: Report Cancelled Status
         if: cancelled()
-        uses: fjogeleit/http-request-action@v1
-        with:
-          url: ${{ env.STATUS_URL }}
-          method: 'POST'
-          customHeaders: '{"Content-Type": "application/json"}'
-          data: '{"uuid": "${{ inputs.uuid }}", "status": "Generation cancelled, try again"}'
+        shell: bash
+        run: |
+          echo "Build was cancelled!"
+          echo "UUID: ${{ inputs.uuid }}"
+          echo "Please retry the build if needed."
