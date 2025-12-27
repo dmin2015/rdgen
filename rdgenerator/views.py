@@ -78,12 +78,15 @@ def generator_view(request):
             enableCamera = form.cleaned_data['enableCamera']
             enableTerminal = form.cleaned_data['enableTerminal']
 
-            if all(char.isascii() for char in filename):
-                filename = re.sub(r'[^\w\s-]', '_', filename).strip()
-                filename = filename.replace(" ","_")
-            else:
+            # 修改文件名处理逻辑，支持中文字符
+            filename = re.sub(r'[^\w\s\-\u4e00-\u9fff]', '_', filename).strip()
+            filename = filename.replace(" ","_")
+            if not filename:
                 filename = "rustdesk"
-            if not all(char.isascii() for char in appname):
+            
+            # 移除ASCII字符检查，支持中文app名称
+            appname = appname.strip()
+            if not appname:
                 appname = "rustdesk"
             myuuid = str(uuid.uuid4())
             protocol = _settings.PROTOCOL
