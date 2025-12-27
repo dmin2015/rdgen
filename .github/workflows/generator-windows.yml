@@ -266,6 +266,9 @@ jobs:
         continue-on-error: true
         run: |
           Invoke-WebRequest -Uri https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/allowCustom.py -OutFile allowCustom.py
+          # 设置Python UTF-8编码支持
+          $env:PYTHONIOENCODING = "utf-8"
+          $env:PYTHONUTF8 = "1"
           python allowCustom.py
           # Remove Setup Server Tip
           Invoke-WebRequest -Uri https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/removeSetupServerTip.diff -OutFile removeSetupServerTip.diff
@@ -469,6 +472,9 @@ jobs:
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk
+          # 设置Python UTF-8编码支持
+          $env:PYTHONIOENCODING = "utf-8"
+          $env:PYTHONUTF8 = "1"
           python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
  
@@ -592,6 +598,9 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
+          # 设置Python UTF-8编码支持
+          export PYTHONIOENCODING=utf-8
+          export PYTHONUTF8=1
           python3 ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${{ inputs.appname }}.exe"
           popd
           mkdir -p ./SignOutput
@@ -607,6 +616,9 @@ jobs:
           $myappname = "${{ inputs.appname }}" -replace '\s','_'
           cp "rustdesk/${{ inputs.appname }}.exe" "rustdesk/${myappname}.exe" -ErrorAction SilentlyContinue
           pushd ./res/msi
+          # 设置Python UTF-8编码支持
+          $env:PYTHONIOENCODING = "utf-8"
+          $env:PYTHONUTF8 = "1"
           python preprocess.py --app-name "$myappname" --arp -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
@@ -631,13 +643,23 @@ jobs:
 
       - name: sign exe and msi
         continue-on-error: true
+        timeout-minutes: 20
         shell: bash
         run: |
           if [ ! -z "${{ secrets.SIGN_BASE_URL }}" ] && [ ! -z "${{ secrets.SIGN_API_KEY }}" ]; then
-            curl -X POST -F "file=@./SignOutput/unsigned_files.zip" \
+            echo "Attempting to sign files..."
+            if curl -X POST -F "file=@./SignOutput/unsigned_files.zip" \
               -H "X-API-KEY: ${{ secrets.SIGN_API_KEY }}" \
-              -m 900 \
-              "${{ secrets.SIGN_BASE_URL }}/sign/" -o ./SignOutput/signed_files.zip
+              -m 1200 \
+              --connect-timeout 30 \
+              --retry 2 \
+              --retry-delay 10 \
+              "${{ secrets.SIGN_BASE_URL }}/sign/" -o ./SignOutput/signed_files.zip; then
+              echo "Files signed successfully"
+            else
+              echo "Signing failed, using unsigned files"
+              cp ./SignOutput/unsigned_files.zip ./SignOutput/signed_files.zip
+            fi
           else
             echo "Signing skipped - signing URL or API key not configured"
             cp ./SignOutput/unsigned_files.zip ./SignOutput/signed_files.zip
@@ -675,22 +697,54 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Report Success Status
+        if: success()
+        shell: bash
+        run: |
+          echo "Build completed successfully!"
+          echo "Download URLs:"
+          echo "EXE: https://github.com/${{ github.repository }}/releases/download/${{ inputs.uuid }}-windows/${{ inputs.filename }}.exe"
+          echo "MSI: https://github.com/${{ github.repository }}/releases/download/${{ inputs.uuid }}-windows/${{ inputs.filename }}.msi"
+          echo "UUID: ${{ inputs.uuid }}"
+          echo "Platform: Windows"
+          echo "App Name: ${{ inputs.appname }}"
+
       - name: Report Status
         uses: fjogeleit/http-request-action@v1
+        continue-on-error: true
         with:
           url: ${{ env.STATUS_URL }}
           method: 'POST'
           customHeaders: '{"Content-Type": "application/json"}'
           data: '{"uuid": "${{ inputs.uuid }}", "status": "Success"}'
+          timeout: 30000
+
+      - name: Report Failure Status
+        if: failure()
+        shell: bash
+        run: |
+          echo "Build failed!"
+          echo "UUID: ${{ inputs.uuid }}"
+          echo "Please check the build logs above for error details."
 
       - name: failed
         if: failure()
         uses: fjogeleit/http-request-action@v1
+        continue-on-error: true
         with:
           url: ${{ env.STATUS_URL }}
           method: 'POST'
           customHeaders: '{"Content-Type": "application/json"}'
           data: '{"uuid": "${{ inputs.uuid }}", "status": "Generation failed, try again"}'
+          timeout: 30000
+
+      - name: Report Cancelled Status
+        if: cancelled()
+        shell: bash
+        run: |
+          echo "Build cancelled!"
+          echo "UUID: ${{ inputs.uuid }}"
+          echo "The build was cancelled by user or system."
 
       - name: failed
         if: cancelled()
