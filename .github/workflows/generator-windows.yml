@@ -660,19 +660,20 @@ jobs:
         run: |
           mv ./SignOutput/rustdesk.msi "./SignOutput/${{ inputs.filename }}.msi" || echo "rustdesk"
 
-      - name: send file to rdgen server
-        if: ${{ fromJson(inputs.extras).rdgen == 'true' }}
+      - name: Upload to GitHub Releases
+        if: always()
         shell: bash
         run: |
-          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.exe" -F "uuid=${{ inputs.uuid }}" ${{ secrets.GENURL }}/save_custom_client
-          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.msi" -F "uuid=${{ inputs.uuid }}" ${{ secrets.GENURL }}/save_custom_client || true
-
-      - name: send file to api server
-        if: ${{ fromJson(inputs.extras).rdgen == 'false' }}
-        shell: bash
-        run: |
-          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.exe" ${{ inputs.apiServer }}/api/save_custom_client
-          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.msi" ${{ inputs.apiServer }}/api/save_custom_client || true
+          # 创建GitHub Release并上传文件
+          gh release create "${{ inputs.uuid }}-windows" \
+            "./SignOutput/${{ inputs.filename }}.exe" \
+            "./SignOutput/${{ inputs.filename }}.msi" \
+            --title "Custom Build ${{ inputs.uuid }}-windows" \
+            --notes "Custom RustDesk build for ${{ inputs.appname }}\nUUID: ${{ inputs.uuid }}\nPlatform: Windows" \
+            --repo ${{ github.repository }} \
+            || echo "Release might already exist, continuing..."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Report Status
         uses: fjogeleit/http-request-action@v1
