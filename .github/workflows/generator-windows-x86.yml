@@ -358,6 +358,9 @@ jobs:
         id: build
         shell: bash
         run: |
+          # 设置Python UTF-8编码支持
+          export PYTHONIOENCODING=utf-8
+          export PYTHONUTF8=1
           python3 res/inline-sciter.py
           # Patch sciter x86
           sed -i 's/branch = "dyn"/branch = "dyn_x86"/g' ./Cargo.toml
@@ -439,6 +442,9 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
+          # 设置Python UTF-8编码支持
+          export PYTHONIOENCODING=utf-8
+          export PYTHONUTF8=1
           python3 ./generate.py -f ../../Release/ -o . -e "../../Release/${{ inputs.appname }}.exe"
           popd
           mkdir -p ./SignOutput
