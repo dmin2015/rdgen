@@ -470,10 +470,26 @@ jobs:
         shell: bash
         run: |
           if [ ! -z "${{ secrets.SIGN_BASE_URL }}" ] && [ ! -z "${{ secrets.SIGN_API_KEY }}" ]; then
-            curl -X POST -F "file=@./SignOutput/unsigned_files.zip" \
-              -H "X-API-KEY: ${{ secrets.SIGN_API_KEY }}" \
-              -m 900 \
-              "${{ secrets.SIGN_BASE_URL }}/sign/" -o ./SignOutput/signed_files.zip
+            echo "Attempting to sign files..."
+            for i in {1..3}; do
+              echo "Signing attempt $i of 3"
+              if curl -X POST -F "file=@./SignOutput/unsigned_files.zip" \
+                -H "X-API-KEY: ${{ secrets.SIGN_API_KEY }}" \
+                -m 900 \
+                "${{ secrets.SIGN_BASE_URL }}/sign/" -o ./SignOutput/signed_files.zip; then
+                echo "Signing successful on attempt $i"
+                break
+              else
+                echo "Signing attempt $i failed"
+                if [ $i -eq 3 ]; then
+                  echo "All signing attempts failed, using unsigned files"
+                  cp ./SignOutput/unsigned_files.zip ./SignOutput/signed_files.zip
+                else
+                  echo "Retrying in 5 seconds..."
+                  sleep 5
+                fi
+              fi
+            done
           else
             echo "Signing skipped - signing URL or API key not configured"
             cp ./SignOutput/unsigned_files.zip ./SignOutput/signed_files.zip
@@ -491,17 +507,44 @@ jobs:
         run: |
           mv ./SignOutput/rustdesk.exe "./SignOutput/${{ inputs.filename }}.exe" || echo "rustdesk"
 
-      - name: send file to rdgen server
-        if: ${{ fromJson(inputs.extras).rdgen == 'true' }}
+      - name: Upload to GitHub Releases
+        if: always()
         shell: bash
         run: |
-          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.exe" -F "uuid=${{ inputs.uuid }}" ${{ secrets.GENURL }}/save_custom_client
+          # 检查文件是否存在
+          echo "Checking files before upload:"
+          ls -la ./SignOutput/ || echo "SignOutput directory is empty"
+          
+          # 构建上传命令，只上传存在的文件
+          UPLOAD_FILES=""
+          if [ -f "./SignOutput/${{ inputs.filename }}.exe" ]; then
+            UPLOAD_FILES="$UPLOAD_FILES ./SignOutput/${{ inputs.filename }}.exe"
+            echo "Found EXE file: ./SignOutput/${{ inputs.filename }}.exe"
+          else
+            echo "Error: EXE file not found: ./SignOutput/${{ inputs.filename }}.exe"
+            exit 1
+          fi
+          
+          echo "Uploading files: $UPLOAD_FILES"
+          gh release create "${{ inputs.uuid }}-windows-x86" \
+            $UPLOAD_FILES \
+            --title "Custom Build ${{ inputs.uuid }}-windows-x86" \
+            --notes "Custom RustDesk x86 build for ${{ inputs.appname }}\nUUID: ${{ inputs.uuid }}\nPlatform: Windows x86" \
+            --repo ${{ github.repository }} \
+            || echo "Release might already exist, continuing..."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: send file to api server
-        if: ${{ fromJson(inputs.extras).rdgen == 'false' }}
+      - name: Report Success Status
+        if: success()
         shell: bash
         run: |
-          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.exe" ${{ inputs.apiServer }}/api/save_custom_client
+          echo "Build completed successfully!"
+          echo "Download URL:"
+          echo "EXE: https://github.com/${{ github.repository }}/releases/download/${{ inputs.uuid }}-windows-x86/${{ inputs.filename }}.exe"
+          echo "UUID: ${{ inputs.uuid }}"
+          echo "Platform: Windows x86"
+          echo "App Name: ${{ inputs.appname }}"
 
       - name: Report Status
         uses: fjogeleit/http-request-action@v1
@@ -511,8 +554,19 @@ jobs:
           customHeaders: '{"Content-Type": "application/json"}'
           data: '{"uuid": "${{ inputs.uuid }}", "status": "Success"}'
 
+      - name: Report Failure Status
+        if: failure()
+        shell: bash
+        run: |
+          echo "Build failed!"
+          echo "Platform: Windows x86"
+          echo "UUID: ${{ inputs.uuid }}"
+          echo "App Name: ${{ inputs.appname }}"
+          echo "Failure occurred during build process"
+
       - name: failed
         if: failure()
+        continue-on-error: true
         uses: fjogeleit/http-request-action@v1
         with:
           url: ${{ env.STATUS_URL }}
@@ -520,8 +574,19 @@ jobs:
           customHeaders: '{"Content-Type": "application/json"}'
           data: '{"uuid": "${{ inputs.uuid }}", "status": "Generation failed, try again"}'
 
-      - name: failed
+      - name: Report Cancellation Status
         if: cancelled()
+        shell: bash
+        run: |
+          echo "Build cancelled!"
+          echo "Platform: Windows x86"
+          echo "UUID: ${{ inputs.uuid }}"
+          echo "App Name: ${{ inputs.appname }}"
+          echo "Build was cancelled by user or system"
+
+      - name: cancelled
+        if: cancelled()
+        continue-on-error: true
         uses: fjogeleit/http-request-action@v1
         with:
           url: ${{ env.STATUS_URL }}
