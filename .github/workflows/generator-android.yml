@@ -216,6 +216,15 @@ jobs:
         run: |
           cd $(dirname $(dirname $(which flutter)))
           [[ "3.24.5" == ${{env.ANDROID_FLUTTER_VERSION}} ]] && git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Allow custom configuration
+        continue-on-error: true
+        run: |
+          wget https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/allowCustom.py
+          python3 allowCustom.py
+          # Remove Setup Server Tip
+          wget https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/removeSetupServerTip.diff
+          git apply removeSetupServerTip.diff
   
 
       - uses: nttld/setup-ndk@v1
@@ -515,7 +524,7 @@ jobs:
               cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so ./flutter/android/app/src/main/jniLibs/armeabi-v7a/
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/armeabi-v7a/librustdesk.so
               echo -n "${{ inputs.custom }}" | cat > ./flutter/assets/custom_.txt
-              #sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
+              sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
               # build flutter
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
@@ -526,7 +535,7 @@ jobs:
               cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/x86_64-linux-android/libc++_shared.so ./flutter/android/app/src/main/jniLibs/x86_64/
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86_64/librustdesk.so
               echo -n "${{ inputs.custom }}" | cat > ./flutter/assets/custom_.txt
-              #sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
+              sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
               # build flutter
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
@@ -537,7 +546,7 @@ jobs:
               cp ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/i686-linux-android/libc++_shared.so ./flutter/android/app/src/main/jniLibs/x86/
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86/librustdesk.so
               echo -n "${{ inputs.custom }}" | cat > ./flutter/assets/custom_.txt
-              #sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
+              sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
               # build flutter
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
