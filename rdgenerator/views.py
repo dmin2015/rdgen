@@ -85,9 +85,11 @@ def generator_view(request):
                 filename = re.sub(r'[^\w\s-]', '_', filename).strip()
                 filename = filename.replace(" ","_")
             else:
-                filename = "rustdesk"
+                filename = re.sub(r'[^\w\s\u4e00-\u9fff-]', '_', filename).strip()
+                filename = filename.replace(" ","_")
             if not all(char.isascii() for char in appname):
-                appname = "rustdesk"
+                appname = re.sub(r'[^\w\s\u4e00-\u9fff-]', '_', appname).strip()
+                appname = appname.replace(" ","_")
             myuuid = str(uuid.uuid4())
             protocol = _settings.PROTOCOL
             host = request.get_host()
@@ -249,7 +251,8 @@ def generator_view(request):
             response = requests.post(url, json=data, headers=headers)
             print(response)
             if response.status_code == 204:
-                return render(request, 'waiting.html', {'filename':filename, 'uuid':myuuid, 'status':"Starting generator...please wait", 'platform':platform})
+                release_url = f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/releases/tag/{myuuid}"
+                return render(request, 'generated.html', {'filename':filename, 'uuid':myuuid, 'status':"Build started", 'platform':platform, 'release_url':release_url})
             else:
                 return JsonResponse({"error": "Something went wrong"})
     else:
