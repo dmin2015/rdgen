@@ -123,8 +123,12 @@ def generator_view(request):
                 decodedCustom['app-name'] = appname
             decodedCustom['override-settings'] = {}
             decodedCustom['default-settings'] = {}
+            print(f"=== DEBUG: permPass = '{permPass}'")
             if permPass != "":
                 decodedCustom['password'] = permPass
+                print(f"=== DEBUG: Password set in decodedCustom")
+            else:
+                print(f"=== DEBUG: No password provided")
             if theme != "system":
                 if themeDorO == "default":
                     if platform == "windows-x86":
@@ -187,10 +191,12 @@ def generator_view(request):
                 decodedCustom['override-settings'][k.strip()] = value.strip()
             
             decodedCustomJson = json.dumps(decodedCustom)
+            print(f"=== DEBUG: decodedCustomJson = {decodedCustomJson}")
 
             string_bytes = decodedCustomJson.encode("ascii")
             base64_bytes = base64.b64encode(string_bytes)
             encodedCustom = base64_bytes.decode("ascii")
+            print(f"=== DEBUG: encodedCustom = {encodedCustom}")
 
             #github limits inputs to 10, so lump extras into one with json
             extras = {}

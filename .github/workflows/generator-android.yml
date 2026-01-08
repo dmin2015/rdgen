@@ -512,8 +512,16 @@ jobs:
             cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
             echo -n "${{ inputs.custom }}" | cat > ./flutter/assets/custom_.txt
             echo -n "${{ inputs.custom }}" | cat > ./flutter/assets/custom.txt
+            echo "=== Debug: custom_.txt content ==="
+            cat ./flutter/assets/custom_.txt
+            echo "=== Debug: custom.txt content ==="
+            cat ./flutter/assets/custom.txt
+            echo "=== Debug: pubspec.yaml assets section ==="
+            grep -A 10 "assets:" ./flutter/pubspec.yaml
             sed -i '/^    - assets\//a\    - assets/custom_.txt' ./flutter/pubspec.yaml
             sed -i '/^    - assets\//a\    - assets/custom.txt' ./flutter/pubspec.yaml
+            echo "=== Debug: After sed, pubspec.yaml assets section ==="
+            grep -A 10 "assets:" ./flutter/pubspec.yaml
             # build flutter
             pushd flutter
             flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
