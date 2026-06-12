@@ -277,7 +277,7 @@ def generator_view(request):
             }
 
             temp_json_path = f"data_{uuid.uuid4()}.json"
-            zip_filename = f"secrets_{uuid.uuid4()}.zip"
+            zip_filename = f"secrets_{myuuid}.zip"
             zip_path = "temp_zips/%s" % (zip_filename)
             Path("temp_zips").mkdir(parents=True, exist_ok=True)
 
@@ -291,17 +291,12 @@ def generator_view(request):
             if os.path.exists(temp_json_path):
                 os.remove(temp_json_path)
 
-            zipJson = {}
-            zipJson['url'] = full_url
-            zipJson['file'] = zip_filename
-
-            zip_url = json.dumps(zipJson)
-
             data = {
                 "ref":_settings.GHBRANCH,
                 "inputs":{
                     "version":version,
-                    "zip_url":zip_url
+                    "uuid":myuuid,
+                    "genurl":_settings.GENURL
                 },
                 "return_run_details": True
             } 

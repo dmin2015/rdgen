@@ -8,8 +8,13 @@ on:
         required: true
         default: ''
         type: string
-      zip_url:
-        description: 'url to zip of json'
+      uuid:
+        description: 'unique identifier for this build'
+        required: true
+        default: ''
+        type: string
+      genurl:
+        description: 'url of rdgen server'
         required: true
         default: ''
         type: string
@@ -44,7 +49,7 @@ jobs:
   setup:
     uses: ./.github/workflows/fetch-encrypted-secrets.yml
     with:
-      zip_url_json: ${{ inputs.zip_url }}
+      uuid: ${{ inputs.uuid }}
 
   generate-bridge-linux:
     uses: ./.github/workflows/bridge.yml
@@ -560,25 +565,20 @@ jobs:
           # override default build-tools version (29.0.3) -- optional
           BUILD_TOOLS_VERSION: "30.0.2"
 
-      - name: send file to rdgen server
-        if: ${{ env.rdgen == 'true' }}
-        uses: nick-fields/retry@v3
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
         with:
-          timeout_minutes: 1
-          max_attempts: 3
-          shell: bash
-          command: |
-            curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./signed-apk/${{ env.filename }}-${{ matrix.job.arch }}.apk" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client
-
-      - name: send file to api server
-        if: ${{ env.rdgen == 'false' }}
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 1
-          max_attempts: 3
-          shell: bash
-          command: |
-            curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./signed-apk/${{ env.filename }}-${{ matrix.job.arch }}.apk" ${{ env.apiServer }}/api/save_custom_client
+          tag_name: build-${{ env.uuid }}
+          name: Custom Build ${{ env.uuid }}
+          body: |
+            Custom RustDesk client build
+            - Version: ${{ env.VERSION }}
+            - Platform: Android ${{ matrix.job.arch }}
+            - App Name: ${{ env.appname }}
+          files: |
+            ./signed-apk/${{ env.filename }}-${{ matrix.job.arch }}.apk
+          draft: false
+          prerelease: false
 
   deploy:
     needs: [build-rustdesk-android]
