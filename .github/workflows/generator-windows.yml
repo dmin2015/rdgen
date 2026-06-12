@@ -51,6 +51,7 @@ jobs:
     uses: ./.github/workflows/fetch-encrypted-secrets.yml
     with:
       uuid: ${{ inputs.uuid }}
+      genurl: ${{ inputs.genurl }}
 
   generate-bridge:
     uses: ./.github/workflows/bridge.yml
