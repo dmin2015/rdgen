@@ -80,7 +80,7 @@ jobs:
               vcpkg-triplet: arm64-osx,
             }
     env:
-      STATUS_URL: "${{ secrets.GENURL }}/updategh"
+      STATUS_URL: "disabled"
 
     steps:
       - name: Checkout Repository
@@ -98,12 +98,7 @@ jobs:
       - name: Finalize and Cleanup zip/json
         if: always() # Run even if previous steps fail
         continue-on-error: true
-        uses: fjogeleit/http-request-action@v1
-        with:
-          url: "${{ secrets.GENURL }}/cleanzip"
-          method: 'POST'
-          customHeaders: '{"Content-Type": "application/json"}'
-          data: '{"uuid": "${{ env.uuid }}"}'
+        run: echo "Cleanup skipped - no server needed"
 
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v6

@@ -38,7 +38,6 @@ env:
   MACOS_P12_BASE64: "${{ secrets.MACOS_P12_BASE64 }}"
   UPLOAD_ARTIFACT: 'true'
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}"
-  STATUS_URL: "${{ secrets.GENURL }}/updategh"
 
 
 jobs:
@@ -98,12 +97,7 @@ jobs:
       - name: Finalize and Cleanup zip/json
         if: always() # Run even if previous steps fail
         continue-on-error: true
-        uses: fjogeleit/http-request-action@v1
-        with:
-          url: "${{ secrets.GENURL }}/cleanzip"
-          method: 'POST'
-          customHeaders: '{"Content-Type": "application/json"}'
-          data: '{"uuid": "${{ env.uuid }}"}'
+        run: echo "Cleanup skipped - no server needed"
 
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v6
@@ -115,7 +109,7 @@ jobs:
       - name: Set rdgen value
         if: ${{ env.rdgen == 'true' }}
         run: |
-          echo "STATUS_URL=${{ secrets.GENURL }}/updategh" >> $env:GITHUB_ENV
+          echo "STATUS_URL=disabled" >> $env:GITHUB_ENV
 
       - name: Set rdgen value
         if: ${{ env.rdgen == 'false' }}
@@ -530,14 +524,7 @@ jobs:
 
       - name: send file to rdgen server
         if: ${{ env.rdgen == 'true' }}
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 1
-          max_attempts: 3
-          shell: bash
-          command: |
-            curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.exe" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client
-            curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ env.token }}" -F "file=@./SignOutput/${{ env.filename }}.msi" -F "uuid=${{ env.uuid }}" ${{ secrets.GENURL }}/save_custom_client || true
+        run: echo "Upload to rdgen server skipped - now using GitHub Releases"
 
       - name: send file to api server
         if: ${{ env.rdgen == 'false' }}

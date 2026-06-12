@@ -91,12 +91,7 @@ jobs:
       - name: Finalize and Cleanup zip/json
         if: always() # Run even if previous steps fail
         continue-on-error: true
-        uses: fjogeleit/http-request-action@v1
-        with:
-          url: "${{ secrets.GENURL }}/cleanzip"
-          method: 'POST'
-          customHeaders: '{"Content-Type": "application/json"}'
-          data: '{"uuid": "${{ env.uuid }}"}'
+        run: echo "Cleanup skipped - no server needed"
 
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v6
@@ -108,7 +103,7 @@ jobs:
       - name: Set rdgen value
         if: ${{ env.rdgen == 'true' }}
         run: |
-          echo "STATUS_URL=${{ secrets.GENURL }}/updategh" >> $env:GITHUB_ENV
+          echo "STATUS_URL=disabled" >> $env:GITHUB_ENV
 
       - name: Set rdgen value
         if: ${{ env.rdgen == 'false' }}
