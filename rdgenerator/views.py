@@ -277,29 +277,39 @@ def generator_view(request):
             }
 
             temp_json_path = f"data_{uuid.uuid4()}.json"
-            zip_filename = f"secrets_{myuuid}.zip"
-            zip_path = "temp_zips/%s" % (zip_filename)
-            Path("temp_zips").mkdir(parents=True, exist_ok=True)
 
             with open(temp_json_path, "w") as f:
                 json.dump(inputs_raw, f)
 
-            with pyzipper.AESZipFile(zip_path, 'w', compression=pyzipper.ZIP_LZMA, encryption=pyzipper.WZ_AES) as zf:
+            zip_buffer = io.BytesIO()
+            with pyzipper.AESZipFile(zip_buffer, 'w', compression=pyzipper.ZIP_LZMA, encryption=pyzipper.WZ_AES) as zf:
                 zf.setpassword(_settings.ZIP_PASSWORD.encode())
                 zf.write(temp_json_path, arcname="secrets.json")
+            zip_buffer.seek(0)
+            zip_content = zip_buffer.read()
 
             if os.path.exists(temp_json_path):
                 os.remove(temp_json_path)
+
+            secrets_base64 = base64.b64encode(zip_content).decode()
+            print(f"Secrets base64 size: {len(secrets_base64)} bytes")
+            
+            if len(secrets_base64) > 95000:
+                return JsonResponse({"error": f"Configuration too large ({len(secrets_base64)} bytes). Maximum allowed is 95KB."}, status=400)
 
             data = {
                 "ref":_settings.GHBRANCH,
                 "inputs":{
                     "version":version,
                     "uuid":myuuid,
-                    "genurl":_settings.GENURL
+                    "secrets_base64": secrets_base64
                 },
                 "return_run_details": True
-            } 
+            }
+            print(f"GHUSER: {_settings.GHUSER}")
+            print(f"REPONAME: {_settings.REPONAME}")
+            print(f"GHBRANCH: {_settings.GHBRANCH}")
+            print(f"URL: {url}") 
             #print(data)
             headers = {
                 'Accept':  'application/vnd.github+json',
@@ -312,22 +322,32 @@ def generator_view(request):
                 status="Starting generator...please wait"
             )
             try:
-                response = requests.post(url, json=data, headers=headers)
-                #print(response)
-                if response.status_code == 204 or response.status_code == 200:
+                print(f"Sending request to GitHub API...")
+                response = requests.post(url, json=data, headers=headers, timeout=60)
+                print(f"Response status: {response.status_code}")
+                print(f"Response headers: {dict(response.headers)}")
+                print(f"Response text: {response.text[:2000]}")
+                if response.status_code == 204:
+                    github_data = {}
+                elif response.status_code == 200:
                     github_data = response.json()
                     print(github_data)
-                    new_github_run.github_run_id = github_data.get('workflow_run_id')
-                    new_github_run.status = "in_progress"
-                    new_github_run.save()
-
-                    return render(request, 'waiting.html', {'filename':filename, 'uuid':myuuid, 'status':"Starting generator...please wait", 'platform':platform, 'log_url': github_data.get('html_url')})
                 else:
-                    #new_github_run.delete()
-                    return JsonResponse({"error": "GitHub rejected the start request"}, status=500)
-            except Exception as e:
-                #new_github_run.delete()
+                    error_data = response.json() if response.content else {}
+                    error_msg = error_data.get('message', str(response.status_code))
+                    return JsonResponse({"error": f"GitHub rejected the start request: {error_msg}"}, status=500)
+                
+                new_github_run.github_run_id = github_data.get('workflow_run_id')
+                new_github_run.status = "in_progress"
+                new_github_run.save()
+
+                return render(request, 'waiting.html', {'filename':filename, 'uuid':myuuid, 'status':"Starting generator...please wait", 'platform':platform, 'log_url': github_data.get('html_url')})
+            except requests.exceptions.RequestException as e:
+                print(f"Request exception: {type(e).__name__}: {str(e)}")
                 return JsonResponse({"error": f"Connection error: {str(e)}"}, status=500)
+            except Exception as e:
+                print(f"General exception: {type(e).__name__}: {str(e)}")
+                return JsonResponse({"error": f"Error calling GitHub API: {str(e)}"}, status=500)
     else:
         form = GenerateForm()
     #return render(request, 'maintenance.html')
