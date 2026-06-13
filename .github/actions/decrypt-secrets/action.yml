@@ -22,13 +22,16 @@ runs:
         import pyzipper
         import json
         import os
+        import sys
+
+        sys.stdout.reconfigure(encoding='utf-8')
 
         with pyzipper.AESZipFile('${{ inputs.zip_path }}') as zf:
             zf.setpassword('${{ inputs.zip_password }}'.encode())
             with zf.open('secrets.json') as f:
                 secrets = json.load(f)
 
-        with open(os.environ['GITHUB_ENV'], 'a') as env_file:
+        with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
             for key, value in secrets.items():
                 if value:
                     print(f"::add-mask::{value}")
