@@ -311,11 +311,16 @@ def generator_view(request):
             print(f"GHBRANCH: {_settings.GHBRANCH}")
             print(f"URL: {url}") 
             #print(data)
+            # Get proxy from environment or system settings
+            proxy_url = os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy') or os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy')
+            proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+            print(f"Using proxy: {proxy_url if proxy_url else 'None'}")
+
             headers = {
                 'Accept':  'application/vnd.github+json',
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer '+_settings.GHBEARER,
-                'X-GitHub-Api-Version': '2026-03-10'
+                'X-GitHub-Api-Version': '2022-11-28'
             }
             new_github_run = GithubRun(
                 uuid=myuuid,
@@ -323,7 +328,18 @@ def generator_view(request):
             )
             try:
                 print(f"Sending request to GitHub API...")
-                response = requests.post(url, json=data, headers=headers, timeout=60)
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        response = requests.post(url, json=data, headers=headers, timeout=120, proxies=proxies)
+                        break
+                    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                        print(f"Attempt {attempt + 1} failed: {type(e).__name__}: {str(e)}")
+                        if attempt < max_retries - 1:
+                            import time
+                            time.sleep(3 * (attempt + 1))
+                        else:
+                            raise
                 print(f"Response status: {response.status_code}")
                 print(f"Response headers: {dict(response.headers)}")
                 print(f"Response text: {response.text[:2000]}")
@@ -510,9 +526,11 @@ def startgh(request):
         'Accept':  'application/vnd.github+json',
         'Content-Type': 'application/json',
         'Authorization': 'Bearer '+_settings.GHBEARER,
-        'X-GitHub-Api-Version': '2026-03-10'
+        'X-GitHub-Api-Version': '2022-11-28'
     }
-    response = requests.post(url, json=data, headers=headers)
+    proxy_url = os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy') or os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy')
+    proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    response = requests.post(url, json=data, headers=headers, proxies=proxies)
     print(response)
     return HttpResponse(status=204)
 
