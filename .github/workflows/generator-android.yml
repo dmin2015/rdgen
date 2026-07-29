@@ -433,7 +433,7 @@ jobs:
         continue-on-error: true
         if: env.singleTagSelect == 'true'
         run: |
-          wget https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/singleTagSelect.diff
+          wget https://raw.githubusercontent.com/dmin2015/rdgen/refs/heads/master/.github/patches/singleTagSelect.diff
           git apply singleTagSelect.diff
 
       - name: replace flutter icons
