@@ -429,6 +429,13 @@ jobs:
           sed -i -e 's|updateUrl.isNotEmpty|false|' ./flutter/lib/desktop/pages/desktop_home_page.dart
           sed -i '/let (request, url) =/,/Ok(())/{/Ok(())/!d}' ./src/common.rs
 
+      - name: single tag selection
+        continue-on-error: true
+        if: env.singleTagSelect == 'true'
+        run: |
+          wget https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/singleTagSelect.diff
+          git apply singleTagSelect.diff
+
       - name: replace flutter icons
         if: ${{ env.iconlink_url != 'false' }}
         run: |

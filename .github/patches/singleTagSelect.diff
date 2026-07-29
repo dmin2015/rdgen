@@ -1,0 +1,19 @@
+diff --git a/flutter/lib/common/widgets/address_book.dart b/flutter/lib/common/widgets/address_book.dart
+--- a/flutter/lib/common/widgets/address_book.dart
++++ b/flutter/lib/common/widgets/address_book.dart
+@@ -330,11 +330,13 @@
+             name: e,
+             tags: gFFI.abModel.selectedTags,
+             onTap: () {
+               if (gFFI.abModel.selectedTags.contains(e)) {
+-                gFFI.abModel.selectedTags.remove(e);
++                gFFI.abModel.selectedTags.clear();
+               } else {
+-                gFFI.abModel.selectedTags.add(e);
++                gFFI.abModel.selectedTags
++                  ..clear()
++                  ..add(e);
+               }
+             },
+             showActionMenu: editPermission);
+       }

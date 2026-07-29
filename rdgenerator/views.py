@@ -1,6 +1,6 @@
 import io
 from pathlib import Path
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.core.files.base import ContentFile
 import os
@@ -34,6 +34,7 @@ def generator_view(request):
             xOffline = form.cleaned_data['xOffline']
             hidecm = form.cleaned_data['hidecm']
             removeNewVersionNotif = form.cleaned_data['removeNewVersionNotif']
+            singleTagSelect = form.cleaned_data['singleTagSelect']
             server = form.cleaned_data['serverIP']
             key = form.cleaned_data['key']
             apiServer = form.cleaned_data['apiServer']
@@ -269,6 +270,7 @@ def generator_view(request):
                 "cycleMonitor": 'true' if cycleMonitor else 'false',
                 "xOffline": 'true' if xOffline else 'false',
                 "removeNewVersionNotif": 'true' if removeNewVersionNotif else 'false',
+                "singleTagSelect": 'true' if singleTagSelect else 'false',
                 "compname": compname,
                 "androidappid":androidappid,
                 "filename":filename
@@ -424,14 +426,8 @@ def check_for_file(request):
 def download(request):
     filename = request.GET['filename']
     uuid = request.GET['uuid']
-    file_path = os.path.join('exe', uuid, filename)
-    with open(file_path, 'rb') as file:
-        content = file.read()
-    response = HttpResponse(content, headers={
-        'Content-Type': 'application/vnd.microsoft.portable-executable',
-        'Content-Disposition': f'attachment; filename="{filename}"'
-    })
-    return response
+    github_release_url = f"https://github.com/{_settings.GHUSER}/{_settings.REPONAME}/releases/download/build-{uuid}/{quote(filename)}"
+    return HttpResponseRedirect(github_release_url)
 
 def get_png(request):
     filename = request.GET['filename']

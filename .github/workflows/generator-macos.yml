@@ -451,6 +451,18 @@ jobs:
           sed -i -e 's|updateUrl.isNotEmpty|false|' ./flutter/lib/desktop/pages/desktop_home_page.dart
           sed -i '/let (request, url) =/,/Ok(())/{/Ok(())/!d}' ./src/common.rs
 
+      - name: single tag selection
+        if: env.singleTagSelect == 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 1
+          max_attempts: 3
+          shell: bash
+          continue_on_error: true
+          command: |
+            wget https://raw.githubusercontent.com/bryangerlach/rdgen/refs/heads/master/.github/patches/singleTagSelect.diff
+            git apply singleTagSelect.diff
+
       - name: Restore bridge files
         uses: actions/download-artifact@master
         with:
