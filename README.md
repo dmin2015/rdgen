@@ -10,6 +10,7 @@ If you would like to host the generator yourself, see [here](setup.md)
 - Custom icon/logo
 - Set default settings for the client
 - Support for rustdesk advanced settings (https://rustdesk.com/docs/en/self-host/client-configuration/advanced-settings/)
+- Android only: custom touch mode gestures (one-finger drag moves the canvas; hold still 0.2s = mouse drag, 0.6s = right click; two-finger vertical swipe is the mouse wheel)
 
 ## Generate RustDesk clients from command line instead of using a web browser
 

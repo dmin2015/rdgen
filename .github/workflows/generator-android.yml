@@ -436,6 +436,34 @@ jobs:
           wget https://raw.githubusercontent.com/dmin2015/rdgen/refs/heads/master/.github/patches/singleTagSelect.diff
           git apply singleTagSelect.diff
 
+      - name: Checkout rdgen patches
+        # The RustDesk source checkout above wipes this repo's working tree, so
+        # the gesture patch is re-fetched here before it is needed.
+        if: env.androidTouchGesture == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref_name }}
+          path: rdgen-src
+          clean: false
+          sparse-checkout: |
+            .github/patches
+
+      - name: Android touch mode gestures (canvas pan, 0.2s hold drag, 0.6s right click, two-finger wheel)
+        if: env.androidTouchGesture == 'true'
+        run: |
+          PATCH_FILE=""
+          for candidate in \
+            "rdgen-src/.github/patches/android_touch_gesture.py" \
+            ".github/patches/android_touch_gesture.py"; do
+            if [ -f "$candidate" ]; then PATCH_FILE="$candidate"; break; fi
+          done
+          if [ -z "$PATCH_FILE" ]; then
+            echo "::error::android_touch_gesture.py not found in the workspace"
+            exit 1
+          fi
+          python3 "$PATCH_FILE"
+
       - name: replace flutter icons
         if: ${{ env.iconlink_url != 'false' }}
         run: |

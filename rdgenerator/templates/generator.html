@@ -289,6 +289,11 @@
                     {{ form.settings }}<br><br>
                     <label for="{{ form.androidappid.id_for_label }}">Custom Android App ID (replaces 'com.carriez.flutter_hbb', leave blank to use default):</label>
                     {{ form.androidappid }}<br><br>
+                    <div id="androidTouchGestureRow">
+                        <label for="{{ form.androidTouchGesture.id_for_label }}">Android touch mode gestures (touch mode only, other platforms ignore this):</label>
+                        {{ form.androidTouchGesture }}
+                        <div class="help-text">Touch mode only: one-finger move pans the remote screen (canvas); hold the finger still for 0.2s to drag with the left mouse button (then move = drag, lift = release); hold still for 0.6s to send a right click; two-finger vertical swipe = mouse wheel, two-finger horizontal swipe = canvas pan, pinch = zoom. A quick tap stays a left click.</div><br>
+                    </div>
             </div>
 
             <div class="section">
@@ -408,13 +413,22 @@
         </div>
     </form>
     <script>
+        function updateAndroidOnlyVisibility() {
+            var row = document.getElementById('androidTouchGestureRow');
+            if (!row) return;
+            var platform = document.getElementById('id_platform').value;
+            row.style.display = (platform === 'android') ? 'block' : 'none';
+        }
         document.querySelectorAll('.platform-icon').forEach(icon => {
             icon.addEventListener('click', function() {
                 document.querySelectorAll('.platform-icon').forEach(i => i.classList.remove('active'));
                 this.classList.add('active');
                 document.getElementById('id_platform').value = this.dataset.platform;
+                updateAndroidOnlyVisibility();
             });
         });
+        document.getElementById('id_platform').addEventListener('change', updateAndroidOnlyVisibility);
+        updateAndroidOnlyVisibility();
         document.getElementById("{{ form.iconfile.id_for_label }}").addEventListener('change', function(event) {
             previewImage(event.target, 'icon-preview');
         });

@@ -63,6 +63,7 @@ def generator_view(request):
             androidappid = form.cleaned_data['androidappid']
             if not androidappid:
                 androidappid = "com.carriez.flutter_hbb"
+            androidTouchGesture = form.cleaned_data['androidTouchGesture']
             compname = compname.replace("&","\\&")
             permPass = form.cleaned_data['permanentPassword']
             theme = form.cleaned_data['theme']
@@ -273,6 +274,7 @@ def generator_view(request):
                 "singleTagSelect": 'true' if singleTagSelect else 'false',
                 "compname": compname,
                 "androidappid":androidappid,
+                "androidTouchGesture": 'true' if androidTouchGesture == 'canvasPan' else 'false',
                 "filename":filename
             }
 

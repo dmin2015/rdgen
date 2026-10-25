@@ -26,6 +26,11 @@ class GenerateForm(forms.Form):
         ('settingsN', 'Yes, DISABLE settings')
     ], initial='settingsY')
     androidappid = forms.CharField(label="Custom Android App ID (replaces 'com.carriez.flutter_hbb')", required=False)
+    #Android touch mode gestures (Android builds only)
+    androidTouchGesture = forms.ChoiceField(label="Android touch mode gestures", choices=[
+        ('default', 'Default (official gestures)'),
+        ('canvasPan', 'Canvas pan + hold gestures (0.2s drag / 0.6s right click) + two-finger wheel'),
+    ], initial='default')
 
     #Custom Server
     serverIP = forms.CharField(label="Host", required=False)
