@@ -2,8 +2,8 @@
 db.sqlite3
 gunicorn.conf
 .venv
-# local dev launcher: contains a plain text GitHub PAT - never commit
-start_dev.bat
+# local configuration: contains the GitHub PAT in plain text - never commit
+.env
 # encrypted build secrets (AES zip) - never commit
 temp_zips/
 # local RustDesk source copies used to build/verify the patches

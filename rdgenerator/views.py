@@ -301,6 +301,21 @@ def generator_view(request):
             if len(secrets_base64) > 95000:
                 return JsonResponse({"error": f"Configuration too large ({len(secrets_base64)} bytes). Maximum allowed is 95KB."}, status=400)
 
+            # Fail early with a clear message instead of an opaque 401 from
+            # the GitHub API when the PAT is missing or invalid.
+            if not _settings.GHUSER or not _settings.GHBEARER:
+                missing = []
+                if not _settings.GHUSER:
+                    missing.append('GHUSER')
+                if not _settings.GHBEARER:
+                    missing.append('GHBEARER')
+                return JsonResponse({
+                    "error": "Server is not configured for GitHub builds: "
+                             f"{', '.join(missing)} is empty. Set it in the .env "
+                             "file (see .env.example) or run setup_dev.bat, then "
+                             "restart the server."
+                }, status=503)
+
             data = {
                 "ref":_settings.GHBRANCH,
                 "inputs":{
@@ -355,6 +370,22 @@ def generator_view(request):
                 else:
                     error_data = response.json() if response.content else {}
                     error_msg = error_data.get('message', str(response.status_code))
+                    if response.status_code in (401, 403):
+                        hint = ("The GitHub token was rejected. Check that GHBEARER "
+                                "in .env is a valid, unexpired PAT with the "
+                                "'workflow' scope on "
+                                f"{_settings.GHUSER}/{_settings.REPONAME}.")
+                        return JsonResponse({
+                            "error": f"GitHub rejected the start request: {error_msg}. {hint}"
+                        }, status=502)
+                    if response.status_code == 404:
+                        hint = ("The workflow file was not found. Make sure the "
+                                f"generator-{platform}.yml workflow exists on "
+                                f"{_settings.GHUSER}/{_settings.REPONAME} "
+                                f"branch {_settings.GHBRANCH}.")
+                        return JsonResponse({
+                            "error": f"GitHub rejected the start request: {error_msg}. {hint}"
+                        }, status=502)
                     return JsonResponse({"error": f"GitHub rejected the start request: {error_msg}"}, status=500)
                 
                 new_github_run.github_run_id = github_data.get('workflow_run_id')

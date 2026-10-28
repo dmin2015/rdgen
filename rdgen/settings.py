@@ -16,6 +16,34 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _load_dotenv(path):
+    """Load KEY=VALUE pairs from a .env file into os.environ.
+
+    Real environment variables always win, so a container/systemd deployment
+    keeps full control and the .env file is only a local convenience.
+    This keeps secrets such as GHBEARER out of the shell scripts and out of
+    version control.
+    """
+    try:
+        content = path.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError):
+        return
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, _, value = line.partition('=')
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv(BASE_DIR / '.env')
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
@@ -29,6 +57,17 @@ ZIP_PASSWORD = os.environ.get("ZIP_PASSWORD",'insecure')
 PROTOCOL = os.environ.get("PROTOCOL", 'https')
 REPONAME = os.environ.get("REPONAME", 'rdgen')
 SH_SECRET = os.environ.get('SH_SECRET', 'secret')
+# Local dev server port, used by start_dev.bat
+RDGEN_PORT = int(os.environ.get('RDGEN_PORT', '8000'))
+
+
+def github_configured():
+    """True when both the GitHub account and the PAT are available.
+
+    Without them the app still renders, but starting a build fails with an
+    opaque 401 from the GitHub API.
+    """
+    return bool(GHUSER and GHBEARER)
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
