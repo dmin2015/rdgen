@@ -1,0 +1,15 @@
+# Normalise text files in the repository to LF, check them out with the
+# platform's native line endings.
+* text=auto
+
+# Windows batch files must be CRLF in the working tree, otherwise cmd.exe
+# can mis-parse labels, goto and multi-line blocks.
+*.bat text eol=crlf
+
+# Shell scripts must stay LF or they break on Linux/macOS.
+*.sh text eol=lf
+
+# These are read by Python on the CI runners.
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
