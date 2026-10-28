@@ -628,6 +628,20 @@ jobs:
         run: |
           rustup target add ${{ matrix.job.target }}
           cargo install cargo-ndk --version ${{ env.CARGO_NDK_VERSION }} --locked
+          # The hwcodec crate links the static ffmpeg libraries of vcpkg, but
+          # its build script only declares "rerun-if-changed" for its own
+          # sources. When the ffmpeg port is patched, the restored cargo cache
+          # still holds a libhwcodec.a that was linked against the old
+          # libavcodec.a, so the new ffmpeg code would silently be missing
+          # from the APK. Dropping the build artifacts of hwcodec forces
+          # cargo to run its build script again and to link the ffmpeg
+          # libraries that were just built.
+          if [ "${{ env.androidMediaCodecProfile }}" = "true" ]; then
+            echo "Dropping the cached hwcodec build artifacts so that the patched ffmpeg is linked in"
+            rm -rf ./target/${{ matrix.job.target }}/release/build/hwcodec-*
+            rm -rf ./target/${{ matrix.job.target }}/release/deps/libhwcodec*
+            rm -rf ./target/${{ matrix.job.target }}/release/.fingerprint/hwcodec-*
+          fi
           case ${{ matrix.job.target }} in
             aarch64-linux-android)
             ./flutter/ndk_arm64.sh
