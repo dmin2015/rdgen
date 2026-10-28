@@ -299,6 +299,11 @@
                         {{ form.androidEncoderFallback }}
                         <div class="help-text">Applies to the <b>controlled</b> Android device (the one being remote-controlled). Default: RustDesk only accepts <i>hardware</i> H.264/H.265 MediaCodec encoders, so a device without one (e.g. Android 9 boxes, 32-bit ARM) silently falls back to the bundled software VP8 encoder, which is too slow for 1080p and produces a blurry picture. With the fallback enabled the device uses the software H.264 MediaCodec encoder (OMX.google.h264.encoder) instead - the same encoder scrcpy uses - and encodes at full resolution. Devices that do have a hardware H.264/H.265 encoder are not affected.</div><br>
                     </div>
+                    <div id="androidMediaCodecProfileRow">
+                        <label for="{{ form.androidMediaCodecProfile.id_for_label }}">Android MediaCodec profile fix (other platforms ignore this):</label>
+                        {{ form.androidMediaCodecProfile }}
+                        <div class="help-text">Applies to the <b>controlled</b> Android device (the one being remote-controlled). Some MediaCodec encoders - notably the Rockchip AVC encoder (OMX.rk.video_encoder.avc) of the very common RK3566 boxes - refuse to be configured when the MediaFormat carries an explicit profile, so the encoder fails to start, RustDesk falls back to the software VP8 encoder and halves the capture resolution, which makes the remote picture blurry. With this option enabled the client is built with an ffmpeg patch that leaves the profile/level out of the MediaFormat for those encoders, so the <i>hardware</i> H.264 encoder is used at full resolution. Other devices are not affected.</div><br>
+                    </div>
             </div>
 
             <div class="section">
@@ -420,7 +425,7 @@
     <script>
         function updateAndroidOnlyVisibility() {
             var platform = document.getElementById('id_platform').value;
-            ['androidTouchGestureRow', 'androidEncoderFallbackRow'].forEach(function(id) {
+            ['androidTouchGestureRow', 'androidEncoderFallbackRow', 'androidMediaCodecProfileRow'].forEach(function(id) {
                 var row = document.getElementById(id);
                 if (!row) return;
                 row.style.display = (platform === 'android') ? 'block' : 'none';
