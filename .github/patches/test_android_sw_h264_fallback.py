@@ -245,7 +245,18 @@ HWCODEC_149 = '''    pub fn get() -> HwCodecConfig {
                 ram_encode: e,
                 ..Default::default()
             }
-        }'''
+        }
+                match Encoder::new(ctx.clone()) {
+                    Ok(encoder) => Ok(HwRamEncoder {
+                        encoder,
+                        format,
+                        pixfmt: ctx.pixfmt,
+                        bitrate,
+                        config,
+                    }),
+                    Err(_) => Err(anyhow!(format!("Failed to create encoder"))),
+                }
+'''
 
 HWCODEC_MASTER = '''    pub fn get() -> HwCodecConfig {
         #[cfg(target_os = "android")]
@@ -312,21 +323,30 @@ HWCODEC_MASTER = '''    pub fn get() -> HwCodecConfig {
                 ram_encode: e,
                 ..Default::default()
             }
-        }'''
+        }
+                match Encoder::new(ctx.clone()) {
+                    Ok(encoder) => Ok(HwRamEncoder {
+                        encoder,
+                        format,
+                        pixfmt: ctx.pixfmt,
+                        bitrate,
+                        config,
+                    }),
+                    Err(_) => Err(anyhow!(format!("Failed to create encoder"))),
+                }
+'''
 
 
 NEEDLES_KOTLIN = [
     'codecObject.put("hw", hw ?: false)',
-    'val rawW = w',
-    'val rawH = h',
-    'isSizeSupported(rawW,rawH)',
-    'isSizeSupported(rawH,rawW)',
 ]
 
 NEEDLES_RUST = [
-    'let hardware: Vec<_> = matching',
-    '.filter(|c| c.hw == Some(true))',
-    'if hardware.is_empty() && t.name_prefix == "h264"',
+    'c.hw == Some(true)',
+    't.name_prefix == "h264" && c.hw == Some(false)',
+    'codecs.sort_by_key',
+    'retry with MediaCodec encoder',
+    'retry_ctx.mc_name = candidate.mc_name.clone()',
 ]
 
 
@@ -389,12 +409,19 @@ def main():
           '1.4.9 upstream hardware-only filter is still present')
     check('if (hw != true) {' not in kt,
           '1.4.9 upstream software-codec drop is still present')
-    # but a hardware encoder must still win over a software one
-    check('.filter(|c| c.hw == Some(true))' in rs,
+    # a hardware encoder must still win over a software one
+    check('codecs.sort_by_key(|c| if c.hw == Some(true) { 0 } else { 1 })' in rs,
           '1.4.9 hardware preference was lost')
     # the software fallback must be limited to H.264
-    check('t.name_prefix == "h264"' in rs,
+    check('t.name_prefix == "h264" && c.hw == Some(false)' in rs,
           '1.4.9 software fallback is not limited to H.264')
+    # the retry must happen when the encoder cannot be created
+    check('retry with MediaCodec encoder' in rs,
+          '1.4.9 the MediaCodec encoder retry is missing')
+    # the upstream size check must be gone, otherwise the software encoders
+    # (1280x720 limit) never reach the Rust side
+    check('isSizeSupported' not in kt,
+          '1.4.9 the upstream encoder size check is still present')
     shutil.rmtree(tmp)
 
     # 2. idempotency

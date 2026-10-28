@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rdgen Android software H.26x MediaCodec encoder fallback patch.
+rdgen Android encoder fallback patch.
 
 Applied by .github/workflows/generator-android.yml when the "Android encoder
 fallback" option is set to "Software H.264 (MediaCodec)".
@@ -8,7 +8,7 @@ fallback" option is set to "Software H.264 (MediaCodec)".
 Problem
 -------
 On Android, RustDesk encodes the screen of the *controlled* device (the
-"server" side) with a MediaCodec encoder, wrapped by ffmpeg
+"server" side) with a MediaCodec encoder wrapped by ffmpeg
 (`h264_mediacodec` / `hevc_mediacodec`). The list of usable encoders is
 collected in two places:
 
@@ -18,42 +18,56 @@ collected in two places:
   2. libs/scrap/src/common/hwcodec.rs `HwCodecConfig::get()` keeps only the
      codecs flagged as hardware (`c.hw == Some(true) //only use hardware codec`).
 
-On a device without a hardware H.264/H.265 encoder both filters remove every
-candidate, so `ram_encode` ends up empty, `h264_useable` / `h265_useable` are
-false and `scrap::codec` silently falls back to the bundled *software* VP8
-encoder (libvpx). Encoding 1080p VP8 in software on a 32 bit ARM CPU is very
-expensive, so the encoder cannot keep up, the frame rate drops and the
-picture the user sees is blurry. The same device is perfectly capable of
-encoding H.264 with the software MediaCodec codec `OMX.google.h264.encoder`
-(that is exactly what scrcpy uses on such boxes).
+When the hardware MediaCodec encoder cannot be created at runtime, RustDesk
+gives up on H.26x completely: `Encoder::new()` clears the hardware codec
+config, the negotiated format falls back to VP8/VP9, and because the VPx
+encoder reports `is_hardware() == false` the capture resolution is halved
+(`check_change_scale()` -> `half_scale = true`). The user then sees a blurry
+picture encoded with VP8.
 
-Note that `hw` is only reported by the platform since API 29. On older
-releases (e.g. Android 9 / API 28) RustDesk guesses from the codec name and
-marks every `OMX.google.*` / `OMX.SEC.*` / `c2.android.*` codec as software,
-so those devices never get a hardware encoder listed at all.
+This is not a rare corner case. The very common RK3566 boxes are a perfect
+example: their Rockchip encoder `OMX.rk.video_encoder.avc` *exists* and is
+reported by the platform as a hardware H.264 encoder, but it refuses to be
+configured with the parameters RustDesk uses, and the whole session ends up
+on a blurry VP8 stream. Measured on such a device with a MediaCodec probe:
+
+    OMX.rk.video_encoder.avc  1366x768  color=21  flags=1  profile unset -> configure OK
+    OMX.rk.video_encoder.avc  1366x768  color=21  flags=1  profile=1/2/4/8/16/4096 -> FAIL
+    c2.android.avc.encoder    1366x768  color=21  flags=1  any profile            -> configure OK
+
+The reason is the `hwcodec` crate: `cpp/common/util.cpp` hardcodes
+`c->profile = FF_PROFILE_H264_HIGH`, so ffmpeg always writes a "profile" key
+into the MediaFormat, and the Rockchip encoder rejects *any* explicit profile.
+Meanwhile the AOSP software encoders (`c2.android.avc.encoder`,
+`OMX.google.h264.encoder`) accept every profile and encode 1366x768 just fine
+even though they advertise a 1280x720 limit.
 
 What it changes
 ---------------
-  1. MainActivity.kt keeps the software codecs in the codec info and reports
-     them with `hw=false` instead of dropping them.
-  2. MainActivity.kt also tests the unaligned screen size when it checks
-     whether an encoder can handle the capture resolution. The aligned size
-     (1920x1088) can be slightly larger than what a codec advertises
-     (1920x1080), which would reject an otherwise usable encoder.
-  3. libs/scrap/src/common/hwcodec.rs prefers a hardware MediaCodec encoder
-     exactly like upstream, but falls back to a software one when the device
-     has no hardware H.26x encoder at all. The software fallback is limited
-     to H.264: software H.265 encoding is far too slow for the low end
-     devices this fallback targets.
+  1. MainActivity.kt keeps the software MediaCodec encoders in the codec info
+     and reports them with `hw=false` instead of dropping them.
+  2. MainActivity.kt no longer drops an encoder because the platform
+     advertises a maximum size that is smaller than the capture resolution.
+     The advertised limit is unreliable (the AOSP software encoders claim
+     1280x720 but encode 1366x768 fine), so the size check is relaxed and the
+     real limit is enforced later, when the encoder is actually created.
+  3. libs/scrap/src/common/hwcodec.rs keeps *every* usable MediaCodec
+     encoder as a candidate, hardware ones first, and
+     `HwRamEncoder::new()` retries with the next candidate when the encoder
+     cannot be created. The software candidates are limited to H.264:
+     software H.265 encoding is far too slow for the low end devices this
+     fallback targets.
 
-When a hardware H.26x encoder exists, the selected encoder is exactly the
-same as upstream, so the patch is a no-op for those devices.
+Because the software encoder is used through the very same `HwRamEncoder`
+(ffmpeg `h264_mediacodec`) path, `HwRamEncoder::is_hardware()` stays `true`,
+so `check_change_scale()` keeps the full capture resolution: the picture is
+H.264 *and* sharp.
 
 The script performs targeted text replacements on the RustDesk sources so that
 it keeps working across patch releases (1.4.x and master share the same code
 shape for the touched blocks). It is idempotent: running it twice is a
-no-op, and it exits non-zero with a clear message when a target block cannot be
-found, so a build never silently ships the wrong encoder behaviour.
+no-op, and it exits non-zero with a clear message when a target block cannot
+be found, so a build never silently ships the wrong encoder behaviour.
 
 Usage: python3 android_sw_h264_fallback.py [rustdesk_source_root]
 """
@@ -80,42 +94,20 @@ PATCHES = [
             codecObject.put("hw", hw)
 """,
         """            // rdgen: keep software MediaCodec encoders (e.g.
-            // OMX.google.h264.encoder) in the codec info and report them with
-            // hw=false instead of dropping them here. The Rust side prefers a
-            // hardware encoder but falls back to a software one when the
-            // device has no hardware H.26x encoder at all. Upstream drops
-            // them, so RustDesk silently falls back to the much heavier
-            // software VP8 encoder and the remote picture turns blurry.
+            // OMX.google.h264.encoder, c2.android.avc.encoder) in the codec
+            // info and report them with hw=false instead of dropping them
+            // here. They are used as a fallback when the hardware encoder
+            // cannot be created at runtime - see the notes in
+            // libs/scrap/src/common/hwcodec.rs. Upstream drops them, so
+            // RustDesk silently falls back to the much heavier software VP8
+            // encoder and the remote picture turns blurry.
             codecObject.put("hw", hw ?: false)
 """,
     ),
-    # ------------------------------------------ Kotlin: keep the raw screen size
+    # ------------------------- Kotlin: do not drop encoders by advertised size
     (
         'main_activity',
-        'MainActivity.kt -> keep the unaligned screen size for the codec check',
-        """        var w = wh.first
-        var h = wh.second
-        val align = 64
-        w = (w + align - 1) / align * align
-        h = (h + align - 1) / align * align
-""",
-        """        var w = wh.first
-        var h = wh.second
-        // rdgen: keep the unaligned screen size. It is used below to test the
-        // encoder capabilities: the aligned size (e.g. 1920x1088) can be
-        // slightly larger than what a codec advertises (1920x1080), which
-        // would wrongly reject an otherwise usable encoder.
-        val rawW = w
-        val rawH = h
-        val align = 64
-        w = (w + align - 1) / align * align
-        h = (h + align - 1) / align * align
-""",
-    ),
-    # ------------------------------------- Kotlin: encoder size capability test
-    (
-        'main_activity',
-        'MainActivity.kt -> also test the unaligned size for the encoder',
+        'MainActivity.kt -> keep encoders whose advertised max size is too small',
         """                if (codec.isEncoder) {
                     // Encoder's max_height and max_width are interchangeable
                     if (!caps.videoCapabilities.isSizeSupported(w,h) && !caps.videoCapabilities.isSizeSupported(h,w)) {
@@ -123,21 +115,20 @@ PATCHES = [
                     }
                 }
 """,
-        """                if (codec.isEncoder) {
-                    // Encoder's max_height and max_width are interchangeable
-                    // rdgen: also test the unaligned screen size, see rawW/rawH
-                    // above.
-                    if (!caps.videoCapabilities.isSizeSupported(w,h) && !caps.videoCapabilities.isSizeSupported(h,w)
-                        && !caps.videoCapabilities.isSizeSupported(rawW,rawH) && !caps.videoCapabilities.isSizeSupported(rawH,rawW)) {
-                        return@forEach
-                    }
-                }
+        """                // rdgen: do not drop an encoder because the platform
+                // advertises a maximum size that is smaller than the capture
+                // resolution. That limit is unreliable: the AOSP software AVC
+                // encoders advertise 1280x720 but encode 1366x768 just fine.
+                // The real limit is enforced later, when the encoder is
+                // actually created, so an encoder that turns out to be
+                // unusable is rejected at that point instead of being
+                // removed from the list up front.
 """,
     ),
-    # ------------------------------------------- Rust: software H.264 fallback
+    # ------------------- Rust: keep every candidate, hardware ones first
     (
         'hwcodec',
-        'hwcodec.rs -> fall back to a software H.264 MediaCodec encoder',
+        'hwcodec.rs -> keep every MediaCodec encoder as a candidate',
         """                ts.iter().for_each(|t| {
                     let codecs: Vec<_> = info
                         .codecs
@@ -149,36 +140,180 @@ PATCHES = [
                                 && c.hw == Some(true) //only use hardware codec
                         })
                         .collect();
+                    let screen_wh = std::cmp::max(info.w, info.h);
+                    let mut best = None;
+                    if let Some(codec) = codecs
+                        .iter()
+                        .find(|c| c.max_width >= screen_wh && c.max_height >= screen_wh)
+                    {
+                        best = Some(codec.name.clone());
+                    } else {
+                        // find the max resolution
+                        let mut max_area = 0;
+                        for codec in codecs.iter() {
+                            if codec.max_width * codec.max_height > max_area {
+                                best = Some(codec.name.clone());
+                                max_area = codec.max_width * codec.max_height;
+                            }
+                        }
+                    }
+                    if let Some(best) = best {
+                        e.push(CodecInfo {
+                            name: format!("{}_mediacodec", t.name_prefix),
+                            mc_name: Some(best),
+                            format: t.data_format,
+                            hwdevice: hwcodec::ffmpeg::AVHWDeviceType::AV_HWDEVICE_TYPE_NONE,
+                            priority: 0,
+                        });
+                    }
+                });
 """,
         """                ts.iter().for_each(|t| {
-                    // rdgen: prefer a hardware MediaCodec encoder, but fall back
-                    // to a software one (e.g. OMX.google.h264.encoder) when the
-                    // device does not have any hardware H.26x encoder at all.
-                    // Upstream drops the software encoders, so on such devices
-                    // RustDesk silently falls back to the much heavier software
-                    // VP8 encoder and the remote picture turns blurry.
+                    // rdgen: keep every usable MediaCodec encoder as a
+                    // candidate, the hardware ones first. Some hardware
+                    // encoders cannot be created with the parameters RustDesk
+                    // uses - the Rockchip AVC encoder (OMX.rk.video_encoder.avc
+                    // on the very common RK3566 boxes) rejects every explicit
+                    // H.264 profile, and ffmpeg always writes one. Instead of
+                    // giving up on H.26x and falling back to the blurry
+                    // software VP8 encoder, the next candidate is tried.
                     // The software fallback is limited to H.264: software H.265
                     // encoding is far too slow for the low end devices this
                     // fallback targets.
-                    let matching: Vec<_> = info
+                    let mut codecs: Vec<_> = info
                         .codecs
                         .iter()
                         .filter(|c| {
                             c.is_encoder
                                 && c.mime_type.as_str() == get_mime_type(t.data_format)
                                 && c.nv12
+                                && (c.hw == Some(true)
+                                    || (t.name_prefix == "h264" && c.hw == Some(false)))
                         })
                         .collect();
-                    let hardware: Vec<_> = matching
+                    // hardware encoders first, software ones last
+                    codecs.sort_by_key(|c| if c.hw == Some(true) { 0 } else { 1 });
+                    let screen_wh = std::cmp::max(info.w, info.h);
+                    let mut best = None;
+                    if let Some(codec) = codecs
                         .iter()
-                        .filter(|c| c.hw == Some(true))
-                        .copied()
-                        .collect();
-                    let codecs: Vec<_> = if hardware.is_empty() && t.name_prefix == "h264" {
-                        matching
+                        .find(|c| c.max_width >= screen_wh && c.max_height >= screen_wh)
+                    {
+                        best = Some(codec.name.clone());
                     } else {
-                        hardware
-                    };
+                        // find the max resolution
+                        let mut max_area = 0;
+                        for codec in codecs.iter() {
+                            if codec.max_width * codec.max_height > max_area {
+                                best = Some(codec.name.clone());
+                                max_area = codec.max_width * codec.max_height;
+                            }
+                        }
+                    }
+                    if let Some(best) = best {
+                        e.push(CodecInfo {
+                            name: format!("{}_mediacodec", t.name_prefix),
+                            mc_name: Some(best),
+                            format: t.data_format,
+                            hwdevice: hwcodec::ffmpeg::AVHWDeviceType::AV_HWDEVICE_TYPE_NONE,
+                            priority: 0,
+                        });
+                    }
+                    // rdgen: remember the other candidates so that
+                    // HwRamEncoder::new() can retry with them when the
+                    // preferred encoder cannot be created.
+                    for codec in codecs.iter() {
+                        if Some(&codec.name) == best.as_ref() {
+                            continue;
+                        }
+                        e.push(CodecInfo {
+                            name: format!("{}_mediacodec", t.name_prefix),
+                            mc_name: Some(codec.name.clone()),
+                            format: t.data_format,
+                            hwdevice: hwcodec::ffmpeg::AVHWDeviceType::AV_HWDEVICE_TYPE_NONE,
+                            priority: 1,
+                        });
+                    }
+                });
+""",
+    ),
+    # ------------------- Rust: retry with the next candidate on failure
+    (
+        'hwcodec',
+        'hwcodec.rs -> retry with the next MediaCodec encoder candidate',
+        """                match Encoder::new(ctx.clone()) {
+                    Ok(encoder) => Ok(HwRamEncoder {
+                        encoder,
+                        format,
+                        pixfmt: ctx.pixfmt,
+                        bitrate,
+                        config,
+                    }),
+                    Err(_) => Err(anyhow!(format!("Failed to create encoder"))),
+                }
+""",
+        """                match Encoder::new(ctx.clone()) {
+                    Ok(encoder) => Ok(HwRamEncoder {
+                        encoder,
+                        format,
+                        pixfmt: ctx.pixfmt,
+                        bitrate,
+                        config,
+                    }),
+                    Err(_) => {
+                        // rdgen: the preferred MediaCodec encoder cannot be
+                        // created. Try the remaining candidates before giving
+                        // up on H.26x. Some hardware encoders refuse the
+                        // parameters RustDesk uses - the Rockchip AVC encoder
+                        // on the RK3566 boxes rejects every explicit H.264
+                        // profile, and ffmpeg always writes one. Upstream
+                        // clears the hardware config here, the negotiated
+                        // format falls back to VP8/VP9 and, because the VPx
+                        // encoder reports is_hardware() == false, the capture
+                        // resolution is halved - the remote picture turns
+                        // blurry. A software MediaCodec encoder goes through
+                        // the same path, so is_hardware() stays true and the
+                        // full resolution is kept.
+                        let mut last_err = anyhow!(format!("Failed to create encoder"));
+                        let candidates: Vec<_> = HwCodecConfig::get()
+                            .ram_encode
+                            .into_iter()
+                            .filter(|c| {
+                                c.name == config.name && c.mc_name != config.mc_name
+                            })
+                            .collect();
+                        for candidate in candidates {
+                            let mut retry_cfg = config.clone();
+                            retry_cfg.mc_name = candidate.mc_name.clone();
+                            // clamp the bitrate to the range the candidate
+                            // encoder actually supports
+                            let retry_bitrate = Self::check_bitrate_range(&retry_cfg, bitrate);
+                            let mut retry_ctx = ctx.clone();
+                            retry_ctx.mc_name = candidate.mc_name.clone();
+                            retry_ctx.kbs = retry_bitrate as i32;
+                            log::info!(
+                                "retry with MediaCodec encoder: {:?}",
+                                candidate.mc_name
+                            );
+                            match Encoder::new(retry_ctx) {
+                                Ok(encoder) => {
+                                    log::info!("MediaCodec encoder created: {:?}", candidate.mc_name);
+                                    return Ok(HwRamEncoder {
+                                        encoder,
+                                        format,
+                                        pixfmt: ctx.pixfmt,
+                                        bitrate: retry_bitrate,
+                                        config: retry_cfg,
+                                    });
+                                }
+                                Err(_) => {
+                                    last_err = anyhow!(format!("Failed to create encoder"));
+                                }
+                            }
+                        }
+                        Err(last_err)
+                    }
+                }
 """,
     ),
 ]

@@ -516,6 +516,22 @@ jobs:
               echo "::error::the software H.264 encoder option was requested but the patch is NOT in libs/scrap/src/common/hwcodec.rs"
               failed=1
             fi
+            # The runtime fallback is what actually fixes the blurry picture:
+            # the software MediaCodec H.264 encoder has to be tried when the
+            # hardware encoder cannot be created. Checking for the marker
+            # alone is not enough, the retry has to be there.
+            if grep -q "retry with MediaCodec encoder" libs/scrap/src/common/hwcodec.rs; then
+              echo "OK: the MediaCodec encoder retry is present in hwcodec.rs"
+            else
+              echo "::error::the software H.264 encoder option was requested but the MediaCodec encoder retry is NOT in libs/scrap/src/common/hwcodec.rs"
+              failed=1
+            fi
+            if grep -q 'c.hw == Some(false)' libs/scrap/src/common/hwcodec.rs; then
+              echo "OK: the software MediaCodec encoders are kept as candidates"
+            else
+              echo "::error::the software H.264 encoder option was requested but the software MediaCodec encoders are NOT kept as candidates in libs/scrap/src/common/hwcodec.rs"
+              failed=1
+            fi
           fi
 
           if [ "$failed" -ne 0 ]; then
