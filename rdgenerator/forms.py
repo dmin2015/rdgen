@@ -36,6 +36,11 @@ class GenerateForm(forms.Form):
         ('default', 'Default (official behaviour)'),
         ('swH264', 'Software H.264 MediaCodec (OMX.google.h264.encoder) instead of VP8'),
     ], initial='default')
+    #Android MediaCodec profile fix for the controlled device (Android builds only)
+    androidMediaCodecProfile = forms.ChoiceField(label="Android MediaCodec profile fix", choices=[
+        ('default', 'Default (official behaviour)'),
+        ('skipProfile', 'Skip the MediaCodec profile/level keys (keeps the Rockchip hardware encoder)'),
+    ], initial='default')
 
     #Custom Server
     serverIP = forms.CharField(label="Host", required=False)
