@@ -11,6 +11,7 @@ If you would like to host the generator yourself, see [here](setup.md)
 - Set default settings for the client
 - Support for rustdesk advanced settings (https://rustdesk.com/docs/en/self-host/client-configuration/advanced-settings/)
 - Android only: custom touch mode gestures (one-finger drag moves the canvas; hold still 0.2s = mouse drag, 0.6s = right click; two-finger vertical swipe is the mouse wheel)
+- Android only: encoder fallback for the controlled device - when the device has no hardware H.264/H.265 MediaCodec encoder (e.g. Android 9 boxes, 32-bit ARM), use the software H.264 MediaCodec encoder (`OMX.google.h264.encoder`) instead of the bundled software VP8 encoder, which is too slow for 1080p and produces a blurry picture
 
 ## Generate RustDesk clients from command line instead of using a web browser
 

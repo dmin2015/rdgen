@@ -294,6 +294,11 @@
                         {{ form.androidTouchGesture }}
                         <div class="help-text">Touch mode only: one-finger move pans the remote screen (canvas); hold the finger still for 0.2s to drag with the left mouse button (then move = drag, lift = release); hold still for 0.6s to send a right click; two-finger vertical swipe = mouse wheel, two-finger horizontal swipe = canvas pan, pinch = zoom. A quick tap stays a left click.</div><br>
                     </div>
+                    <div id="androidEncoderFallbackRow">
+                        <label for="{{ form.androidEncoderFallback.id_for_label }}">Android encoder fallback (other platforms ignore this):</label>
+                        {{ form.androidEncoderFallback }}
+                        <div class="help-text">Applies to the <b>controlled</b> Android device (the one being remote-controlled). Default: RustDesk only accepts <i>hardware</i> H.264/H.265 MediaCodec encoders, so a device without one (e.g. Android 9 boxes, 32-bit ARM) silently falls back to the bundled software VP8 encoder, which is too slow for 1080p and produces a blurry picture. With the fallback enabled the device uses the software H.264 MediaCodec encoder (OMX.google.h264.encoder) instead - the same encoder scrcpy uses - and encodes at full resolution. Devices that do have a hardware H.264/H.265 encoder are not affected.</div><br>
+                    </div>
             </div>
 
             <div class="section">
@@ -414,10 +419,12 @@
     </form>
     <script>
         function updateAndroidOnlyVisibility() {
-            var row = document.getElementById('androidTouchGestureRow');
-            if (!row) return;
             var platform = document.getElementById('id_platform').value;
-            row.style.display = (platform === 'android') ? 'block' : 'none';
+            ['androidTouchGestureRow', 'androidEncoderFallbackRow'].forEach(function(id) {
+                var row = document.getElementById(id);
+                if (!row) return;
+                row.style.display = (platform === 'android') ? 'block' : 'none';
+            });
         }
         document.querySelectorAll('.platform-icon').forEach(icon => {
             icon.addEventListener('click', function() {

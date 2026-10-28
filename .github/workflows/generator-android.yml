@@ -438,8 +438,8 @@ jobs:
 
       - name: Checkout rdgen patches
         # The RustDesk source checkout above wipes this repo's working tree, so
-        # the gesture patch is re-fetched here before it is needed.
-        if: env.androidTouchGesture == 'true'
+        # the gesture/encoder patches are re-fetched here before they are needed.
+        if: env.androidTouchGesture == 'true' || env.androidEncoderFallback == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}
@@ -460,6 +460,21 @@ jobs:
           done
           if [ -z "$PATCH_FILE" ]; then
             echo "::error::android_touch_gesture.py not found in the workspace"
+            exit 1
+          fi
+          python3 "$PATCH_FILE"
+
+      - name: Android encoder fallback (software H.264 MediaCodec instead of VP8)
+        if: env.androidEncoderFallback == 'true'
+        run: |
+          PATCH_FILE=""
+          for candidate in \
+            "rdgen-src/.github/patches/android_sw_h264_fallback.py" \
+            ".github/patches/android_sw_h264_fallback.py"; do
+            if [ -f "$candidate" ]; then PATCH_FILE="$candidate"; break; fi
+          done
+          if [ -z "$PATCH_FILE" ]; then
+            echo "::error::android_sw_h264_fallback.py not found in the workspace"
             exit 1
           fi
           python3 "$PATCH_FILE"

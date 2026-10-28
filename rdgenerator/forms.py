@@ -31,6 +31,11 @@ class GenerateForm(forms.Form):
         ('default', 'Default (official gestures)'),
         ('canvasPan', 'Canvas pan + hold gestures (0.2s drag / 0.6s right click) + two-finger wheel'),
     ], initial='default')
+    #Android encoder fallback for the controlled device (Android builds only)
+    androidEncoderFallback = forms.ChoiceField(label="Android encoder fallback", choices=[
+        ('default', 'Default (official behaviour)'),
+        ('swH264', 'Software H.264 MediaCodec (OMX.google.h264.encoder) instead of VP8'),
+    ], initial='default')
 
     #Custom Server
     serverIP = forms.CharField(label="Host", required=False)
