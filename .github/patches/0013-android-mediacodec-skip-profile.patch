@@ -1,0 +1,81 @@
+diff --git a/libavcodec/mediacodecenc.c b/libavcodec/mediacodecenc.c
+index 933108b..c336c3b 100644
+--- a/libavcodec/mediacodecenc.c
++++ b/libavcodec/mediacodecenc.c
+@@ -185,6 +185,31 @@ static int mediacodec_init_bsf(AVCodecContext *avctx)
+ 
+ static int mediacodec_generate_extradata(AVCodecContext *avctx);
+ 
++// rdgen: the MediaCodec encoders that refuse to be configured when the
++// MediaFormat carries an explicit profile or level.
++//
++// The Rockchip AVC encoder (OMX.rk.video_encoder.avc) used by the RK3566
++// and other Rockchip boxes rejects every profile value and makes
++// configure() fail with OMX_ErrorBadParameter. Only the vendor prefix is
++// matched, so a device that exposes the encoder under a different name is
++// not affected.
++static int ff_AMediaCodec_refuses_profile(const char *name)
++{
++    static const char *const prefixes[] = {
++        "OMX.rk.",
++        "c2.rk.",
++    };
++
++    if (!name)
++        return 0;
++
++    for (size_t i = 0; i < FF_ARRAY_ELEMS(prefixes); i++)
++        if (av_strstart(name, prefixes[i], NULL))
++            return 1;
++
++    return 0;
++}
++
+ static av_cold int mediacodec_init(AVCodecContext *avctx)
+ {
+     const char *codec_mime = NULL;
+@@ -334,14 +359,36 @@ static av_cold int mediacodec_init(AVCodecContext *avctx)
+     ff_AMediaFormat_setInt32(format, "frame-rate", s->fps);
+     ff_AMediaFormat_setInt32(format, "i-frame-interval", gop);
+ 
+-    ret = ff_AMediaCodecProfile_getProfileFromAVCodecContext(avctx);
+-    if (ret > 0) {
+-        av_log(avctx, AV_LOG_DEBUG, "set profile to 0x%x\n", ret);
+-        ff_AMediaFormat_setInt32(format, "profile", ret);
+-    }
+-    if (s->level > 0) {
+-        av_log(avctx, AV_LOG_DEBUG, "set level to 0x%x\n", s->level);
+-        ff_AMediaFormat_setInt32(format, "level", s->level);
++    // rdgen: do not write an explicit profile/level into the MediaFormat of
++    // the encoders that are known to refuse them.
++    //
++    // The Rockchip AVC encoder (OMX.rk.video_encoder.avc) on the very common
++    // RK3566 boxes rejects *every* explicit profile and fails the whole
++    // configure() call with OMX_ErrorBadParameter (-38). ffmpeg always
++    // writes the profile because the hwcodec crate hardcodes
++    // FF_PROFILE_H264_HIGH, so the key cannot be avoided by the caller.
++    // RustDesk then gives up on H.26x, falls back to VP8 and halves the
++    // capture resolution - that is what makes the remote picture blurry.
++    //
++    // The profile and the level are only hints: when they are absent the
++    // encoder picks its own defaults. Verified on a RK3566 with a
++    // MediaCodec probe: the Rockchip encoder produces real H.264 frames
++    // (SPS/PPS included) at 1366x768 and 1408x768 when no profile is set,
++    // and fails to configure when any profile value is set.
++    if (!ff_AMediaCodec_refuses_profile(s->name)) {
++        ret = ff_AMediaCodecProfile_getProfileFromAVCodecContext(avctx);
++        if (ret > 0) {
++            av_log(avctx, AV_LOG_DEBUG, "set profile to 0x%x\n", ret);
++            ff_AMediaFormat_setInt32(format, "profile", ret);
++        }
++        if (s->level > 0) {
++            av_log(avctx, AV_LOG_DEBUG, "set level to 0x%x\n", s->level);
++            ff_AMediaFormat_setInt32(format, "level", s->level);
++        }
++    } else {
++        av_log(avctx, AV_LOG_DEBUG,
++               "skipping the profile/level keys for the encoder %s\n",
++               s->name ? s->name : "(by mime)");
+     }
+     if (avctx->max_b_frames > 0) {
+         if (avctx->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
