@@ -439,7 +439,7 @@ jobs:
       - name: Checkout rdgen patches
         # The RustDesk source checkout above wipes this repo's working tree, so
         # the gesture/encoder patches are re-fetched here before they are needed.
-        if: env.androidTouchGesture == 'true' || env.androidEncoderFallback == 'true'
+        if: env.androidTouchGesture == 'true' || env.androidEncoderFallback == 'true' || env.androidMediaCodecProfile == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}
@@ -479,6 +479,27 @@ jobs:
           fi
           python3 "$PATCH_FILE"
 
+      - name: Android MediaCodec profile fix (ffmpeg, keeps the Rockchip hardware encoder)
+        # The Rockchip AVC encoder (OMX.rk.video_encoder.avc) of the RK3566
+        # boxes rejects every explicit profile. ffmpeg always writes one
+        # because the hwcodec crate hardcodes FF_PROFILE_H264_HIGH, so the
+        # configure() call fails and RustDesk falls back to VP8 with a halved
+        # resolution. This step installs an ffmpeg patch that skips the
+        # profile/level keys for the encoders that refuse them.
+        if: env.androidMediaCodecProfile == 'true'
+        run: |
+          PATCH_FILE=""
+          for candidate in \
+            "rdgen-src/.github/patches/android_mediacodec_skip_profile.py" \
+            ".github/patches/android_mediacodec_skip_profile.py"; do
+            if [ -f "$candidate" ]; then PATCH_FILE="$candidate"; break; fi
+          done
+          if [ -z "$PATCH_FILE" ]; then
+            echo "::error::android_mediacodec_skip_profile.py not found in the workspace"
+            exit 1
+          fi
+          python3 "$PATCH_FILE"
+
       # Guards against silently shipping a client that does not have the
       # requested patches. The patch steps above are gated on
       # env.<option> == 'true', so a build that was requested with a patch
@@ -489,8 +510,9 @@ jobs:
         run: |
           set -e
           echo "--- patch options in this build ---"
-          echo "androidTouchGesture    = '${ANDROID_TOUCH_GESTURE:-<unset>}'"
-          echo "androidEncoderFallback = '${ANDROID_ENCODER_FALLBACK:-<unset>}'"
+          echo "androidTouchGesture      = '${ANDROID_TOUCH_GESTURE:-<unset>}'"
+          echo "androidEncoderFallback   = '${ANDROID_ENCODER_FALLBACK:-<unset>}'"
+          echo "androidMediaCodecProfile = '${ANDROID_MEDIACODEC_PROFILE:-<unset>}'"
           echo "------------------------------"
           failed=0
 
@@ -534,6 +556,33 @@ jobs:
             fi
           fi
 
+          if [ "${ANDROID_MEDIACODEC_PROFILE:-}" = "true" ]; then
+            # The ffmpeg patch has to be present in the vcpkg port, otherwise
+            # the Rockchip hardware encoder keeps failing to configure and the
+            # remote picture stays blurry.
+            PATCH_FILE="res/vcpkg/ffmpeg/patch/0013-android-mediacodec-skip-profile.patch"
+            if [ -f "$PATCH_FILE" ]; then
+              echo "OK: the ffmpeg MediaCodec profile patch is present"
+            else
+              echo "::error::the MediaCodec profile option was requested but $PATCH_FILE is NOT in the source tree"
+              failed=1
+            fi
+            if grep -q "patch/0013-android-mediacodec-skip-profile.patch" res/vcpkg/ffmpeg/portfile.cmake; then
+              echo "OK: the ffmpeg MediaCodec profile patch is registered in portfile.cmake"
+            else
+              echo "::error::the MediaCodec profile option was requested but the patch is NOT registered in res/vcpkg/ffmpeg/portfile.cmake"
+              failed=1
+            fi
+            # The patch has to keep the guard that skips the profile/level
+            # keys only for the encoders that refuse them.
+            if grep -q "ff_AMediaCodec_refuses_profile" "$PATCH_FILE" 2>/dev/null; then
+              echo "OK: the ffmpeg patch skips the profile for the encoders that refuse it"
+            else
+              echo "::error::the MediaCodec profile option was requested but the ffmpeg patch does not contain the profile guard"
+              failed=1
+            fi
+          fi
+
           if [ "$failed" -ne 0 ]; then
             echo "::error::the build was requested with Android patches that are not in the source tree; refusing to ship a client without them"
             exit 1
@@ -542,6 +591,7 @@ jobs:
         env:
           ANDROID_TOUCH_GESTURE: ${{ env.androidTouchGesture }}
           ANDROID_ENCODER_FALLBACK: ${{ env.androidEncoderFallback }}
+          ANDROID_MEDIACODEC_PROFILE: ${{ env.androidMediaCodecProfile }}
 
       - name: replace flutter icons
         if: ${{ env.iconlink_url != 'false' }}
