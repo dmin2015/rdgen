@@ -31,10 +31,25 @@ runs:
             with zf.open('secrets.json') as f:
                 secrets = json.load(f)
 
+        # Every key is exported, including the ones whose value is "false" or
+        # empty. The build steps gate on env.<option> == 'true', so a missing
+        # key and an explicit "false" must be distinguishable: a missing key
+        # would silently skip an optional patch. Empty values are exported as
+        # an empty string so that the key is always defined.
+        #
+        # Only values that are worth hiding are masked. Masking every value
+        # (including the plain strings "true"/"false") would hide the very
+        # flags the workflow branches on and make the build logs unreadable.
+        masked = 0
         with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
             for key, value in secrets.items():
-                if value:
-                    print(f"::add-mask::{value}")
-                    env_file.write(f"{key}={value}\n")
-        
-        print(f"Successfully masked {len(secrets)} secrets.")
+                text = '' if value is None else str(value)
+                if text:
+                    # A value that is only used to branch on does not need to
+                    # be hidden, and hiding it would make the logs useless.
+                    if text not in ('true', 'false'):
+                        print(f"::add-mask::{text}")
+                        masked += 1
+                env_file.write(f"{key}={text}\n")
+
+        print(f"Successfully masked {masked} secrets, exported {len(secrets)} keys.")

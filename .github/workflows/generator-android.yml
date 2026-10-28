@@ -479,6 +479,54 @@ jobs:
           fi
           python3 "$PATCH_FILE"
 
+      # Guards against silently shipping a client that does not have the
+      # requested patches. The patch steps above are gated on
+      # env.<option> == 'true', so a build that was requested with a patch
+      # but ended up without it would otherwise produce an APK that looks
+      # fine and behaves like the official client. Every requested option is
+      # verified against the actual source tree here.
+      - name: Verify requested Android patches are in the source tree
+        run: |
+          set -e
+          echo "--- patch options in this build ---"
+          echo "androidTouchGesture    = '${ANDROID_TOUCH_GESTURE:-<unset>}'"
+          echo "androidEncoderFallback = '${ANDROID_ENCODER_FALLBACK:-<unset>}'"
+          echo "------------------------------"
+          failed=0
+
+          if [ "${ANDROID_TOUCH_GESTURE:-}" = "true" ]; then
+            if grep -q "rdgen" flutter/lib/common/widgets/remote_input.dart; then
+              echo "OK: touch gesture patch is present"
+            else
+              echo "::error::the touch gesture option was requested but the patch is NOT in flutter/lib/common/widgets/remote_input.dart"
+              failed=1
+            fi
+          fi
+
+          if [ "${ANDROID_ENCODER_FALLBACK:-}" = "true" ]; then
+            if grep -q "rdgen" flutter/android/app/src/main/kotlin/com/carriez/flutter_hbb/MainActivity.kt; then
+              echo "OK: encoder fallback patch is present in MainActivity.kt"
+            else
+              echo "::error::the software H.264 encoder option was requested but the patch is NOT in MainActivity.kt"
+              failed=1
+            fi
+            if grep -q "rdgen" libs/scrap/src/common/hwcodec.rs; then
+              echo "OK: encoder fallback patch is present in hwcodec.rs"
+            else
+              echo "::error::the software H.264 encoder option was requested but the patch is NOT in libs/scrap/src/common/hwcodec.rs"
+              failed=1
+            fi
+          fi
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::the build was requested with Android patches that are not in the source tree; refusing to ship a client without them"
+            exit 1
+          fi
+          echo "All requested Android patches are in place."
+        env:
+          ANDROID_TOUCH_GESTURE: ${{ env.androidTouchGesture }}
+          ANDROID_ENCODER_FALLBACK: ${{ env.androidEncoderFallback }}
+
       - name: replace flutter icons
         if: ${{ env.iconlink_url != 'false' }}
         run: |
