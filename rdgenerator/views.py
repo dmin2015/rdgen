@@ -65,6 +65,7 @@ def generator_view(request):
                 androidappid = "com.carriez.flutter_hbb"
             androidTouchGesture = form.cleaned_data['androidTouchGesture']
             androidEncoderFallback = form.cleaned_data['androidEncoderFallback']
+            androidMediaCodecProfile = form.cleaned_data['androidMediaCodecProfile']
             compname = compname.replace("&","\\&")
             permPass = form.cleaned_data['permanentPassword']
             theme = form.cleaned_data['theme']
@@ -277,6 +278,7 @@ def generator_view(request):
                 "androidappid":androidappid,
                 "androidTouchGesture": 'true' if androidTouchGesture == 'canvasPan' else 'false',
                 "androidEncoderFallback": 'true' if androidEncoderFallback == 'swH264' else 'false',
+                "androidMediaCodecProfile": 'true' if androidMediaCodecProfile == 'skipProfile' else 'false',
                 "filename":filename
             }
 
