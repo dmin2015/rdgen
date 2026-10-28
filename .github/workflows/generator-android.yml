@@ -214,6 +214,45 @@ jobs:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
+      # The ffmpeg MediaCodec profile patch has to be installed *before* the
+      # vcpkg dependencies are built: vcpkg applies the patches listed in
+      # res/vcpkg/ffmpeg/portfile.cmake while it builds ffmpeg, so a patch
+      # that is added afterwards would never reach the compiled library.
+      - name: Checkout rdgen patches for the ffmpeg build
+        if: env.androidMediaCodecProfile == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref_name }}
+          path: rdgen-src
+          clean: false
+          sparse-checkout: |
+            .github/patches
+
+      - name: Android MediaCodec profile fix (ffmpeg, keeps the Rockchip hardware encoder)
+        # The Rockchip AVC encoder (OMX.rk.video_encoder.avc) of the RK3566
+        # boxes rejects every explicit profile. ffmpeg always writes one
+        # because the hwcodec crate hardcodes FF_PROFILE_H264_HIGH, so the
+        # configure() call fails and RustDesk falls back to VP8 with a halved
+        # resolution. This step installs an ffmpeg patch that skips the
+        # profile/level keys for the encoders that refuse them.
+        #
+        # It has to run before "Install vcpkg dependencies", because vcpkg
+        # applies the patches of the portfile while it builds ffmpeg.
+        if: env.androidMediaCodecProfile == 'true'
+        run: |
+          PATCH_FILE=""
+          for candidate in \
+            "rdgen-src/.github/patches/android_mediacodec_skip_profile.py" \
+            ".github/patches/android_mediacodec_skip_profile.py"; do
+            if [ -f "$candidate" ]; then PATCH_FILE="$candidate"; break; fi
+          done
+          if [ -z "$PATCH_FILE" ]; then
+            echo "::error::android_mediacodec_skip_profile.py not found in the workspace"
+            exit 1
+          fi
+          python3 "$PATCH_FILE"
+
       - name: Install vcpkg dependencies
         run: |
           case ${{ matrix.job.target }} in
@@ -475,27 +514,6 @@ jobs:
           done
           if [ -z "$PATCH_FILE" ]; then
             echo "::error::android_sw_h264_fallback.py not found in the workspace"
-            exit 1
-          fi
-          python3 "$PATCH_FILE"
-
-      - name: Android MediaCodec profile fix (ffmpeg, keeps the Rockchip hardware encoder)
-        # The Rockchip AVC encoder (OMX.rk.video_encoder.avc) of the RK3566
-        # boxes rejects every explicit profile. ffmpeg always writes one
-        # because the hwcodec crate hardcodes FF_PROFILE_H264_HIGH, so the
-        # configure() call fails and RustDesk falls back to VP8 with a halved
-        # resolution. This step installs an ffmpeg patch that skips the
-        # profile/level keys for the encoders that refuse them.
-        if: env.androidMediaCodecProfile == 'true'
-        run: |
-          PATCH_FILE=""
-          for candidate in \
-            "rdgen-src/.github/patches/android_mediacodec_skip_profile.py" \
-            ".github/patches/android_mediacodec_skip_profile.py"; do
-            if [ -f "$candidate" ]; then PATCH_FILE="$candidate"; break; fi
-          done
-          if [ -z "$PATCH_FILE" ]; then
-            echo "::error::android_mediacodec_skip_profile.py not found in the workspace"
             exit 1
           fi
           python3 "$PATCH_FILE"
