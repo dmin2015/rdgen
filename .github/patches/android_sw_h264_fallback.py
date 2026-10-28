@@ -194,7 +194,7 @@ PATCHES = [
                     // hardware encoders first, software ones last
                     codecs.sort_by_key(|c| if c.hw == Some(true) { 0 } else { 1 });
                     let screen_wh = std::cmp::max(info.w, info.h);
-                    let mut best = None;
+                    let mut best: Option<String> = None;
                     if let Some(codec) = codecs
                         .iter()
                         .find(|c| c.max_width >= screen_wh && c.max_height >= screen_wh)
@@ -210,6 +210,11 @@ PATCHES = [
                             }
                         }
                     }
+                    // rdgen: the preferred encoder keeps priority 0, the
+                    // remaining candidates get priority 1. HwRamEncoder::new()
+                    // walks them in that order and retries with the next one
+                    // when the preferred encoder cannot be created.
+                    let preferred = best.clone();
                     if let Some(best) = best {
                         e.push(CodecInfo {
                             name: format!("{}_mediacodec", t.name_prefix),
@@ -223,7 +228,7 @@ PATCHES = [
                     // HwRamEncoder::new() can retry with them when the
                     // preferred encoder cannot be created.
                     for codec in codecs.iter() {
-                        if Some(&codec.name) == best.as_ref() {
+                        if Some(&codec.name) == preferred.as_ref() {
                             continue;
                         }
                         e.push(CodecInfo {
@@ -274,7 +279,6 @@ PATCHES = [
                         // blurry. A software MediaCodec encoder goes through
                         // the same path, so is_hardware() stays true and the
                         // full resolution is kept.
-                        let mut last_err = anyhow!(format!("Failed to create encoder"));
                         let candidates: Vec<_> = HwCodecConfig::get()
                             .ram_encode
                             .into_iter()
@@ -297,7 +301,10 @@ PATCHES = [
                             );
                             match Encoder::new(retry_ctx) {
                                 Ok(encoder) => {
-                                    log::info!("MediaCodec encoder created: {:?}", candidate.mc_name);
+                                    log::info!(
+                                        "MediaCodec encoder created: {:?}",
+                                        candidate.mc_name
+                                    );
                                     return Ok(HwRamEncoder {
                                         encoder,
                                         format,
@@ -307,11 +314,14 @@ PATCHES = [
                                     });
                                 }
                                 Err(_) => {
-                                    last_err = anyhow!(format!("Failed to create encoder"));
+                                    log::error!(
+                                        "MediaCodec encoder failed: {:?}",
+                                        candidate.mc_name
+                                    );
                                 }
                             }
                         }
-                        Err(last_err)
+                        Err(anyhow!(format!("Failed to create encoder")))
                     }
                 }
 """,
