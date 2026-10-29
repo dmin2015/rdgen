@@ -32,7 +32,12 @@ env:
   # for arm64 linux because official Dart SDK does not work
   FLUTTER_ELINUX_VERSION: "3.16.9"
   TAG_NAME: "${{ inputs.upload-tag }}"
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  # The vcpkg "x-gha" binary cache provider was retired by GitHub, so it never
+  # hit and every run recompiled libvpx/ffmpeg/opus from scratch (5.7 min of the
+  # build). Use the plain "files" provider instead and persist that directory
+  # with actions/cache below.
+  VCPKG_BINARY_SOURCES: "clear;files,/opt/artifacts/vcpkg-bincache,readwrite"
+  VCPKG_BINARY_CACHE: "/opt/artifacts/vcpkg-bincache"
   # vcpkg version: 2024.07.12
   VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
   ARMV7_VCPKG_COMMIT_ID: "6f29f12e82a8293156836ad81cc9bf5af41fe836"
@@ -207,7 +212,23 @@ jobs:
           ndk-version: ${{ env.NDK_VERSION }}
           add-to-path: true
 
-      - name: Setup vcpkg with Github Actions binary cache
+      - name: Prepare vcpkg binary cache directory
+        run: |
+          sudo mkdir -p "${VCPKG_BINARY_CACHE}"
+          sudo chown -R "$(id -u):$(id -g)" "${VCPKG_BINARY_CACHE}"
+
+      # Cache the vcpkg binary cache (the per-package .zip archives) per
+      # triplet. vcpkg validates the ABI hash of every archive, so restoring a
+      # slightly stale cache is safe: mismatched packages are simply rebuilt.
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_BINARY_CACHE }}
+          key: vcpkg-bincache-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.target }}-${{ env.VERSION }}
+          restore-keys: |
+            vcpkg-bincache-${{ env.VCPKG_COMMIT_ID }}-${{ matrix.job.target }}-
+
+      - name: Setup vcpkg (GitHub Actions cache)
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: /opt/artifacts/vcpkg
@@ -270,6 +291,10 @@ jobs:
           fi
 
       - name: Install vcpkg dependencies
+        env:
+          # Step-level env wins over anything run-vcpkg may have exported, so the
+          # file binary cache is always the one in use.
+          VCPKG_BINARY_SOURCES: "clear;files,/opt/artifacts/vcpkg-bincache,readwrite"
         run: |
           case ${{ matrix.job.target }} in
             aarch64-linux-android)
@@ -737,6 +762,20 @@ jobs:
           convert ./res/icon.png ./flutter/assets/icon.svg
           convert ./res/128x128.png -resize 200% ./flutter/assets/128x128@2x.png || true
           cp ./flutter/assets/icon.svg ./res/scalable.svg
+
+      # Gradle used to run with no cache at all, re-resolving the whole Android
+      # dependency graph on every build (4.8 min). Only the dependency stores
+      # are cached - no build outputs - so a stale cache can never leak a stale
+      # APK into the artifact.
+      - name: Restore Gradle caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper/dists
+          key: gradle-${{ env.ANDROID_FLUTTER_VERSION }}-${{ hashFiles('flutter/android/**/*.gradle', 'flutter/android/**/*.kts', 'flutter/android/gradle/wrapper/gradle-wrapper.properties', 'flutter/pubspec.yaml', 'flutter/pubspec.lock') }}
+          restore-keys: |
+            gradle-${{ env.ANDROID_FLUTTER_VERSION }}-
 
       - name: Build rustdesk
         shell: bash
