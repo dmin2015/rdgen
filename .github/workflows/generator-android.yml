@@ -271,6 +271,52 @@ jobs:
           fi
           python3 "$ALIGN_FILE"
 
+          # The Android client never receives the custom client configuration:
+          # flutter/lib/models/native_model.dart calls mainInit() with a
+          # hard-coded empty customClientConfig, so read_custom_client() is
+          # skipped and the Default/Override settings of the rdgen form have no
+          # effect on Android. That means the user cannot turn off
+          # "enable-android-software-encoding-half-scale" from the form, and the
+          # software encoders keep capturing at half resolution, which is what
+          # makes a remote session look blurry.
+          #
+          # scale_soft is only used by "half_scale = !hardware && scale_soft",
+          # so pinning it to false keeps the native screen size without
+          # touching the hardware encoder path.
+          python3 - <<'PY'
+          import sys
+
+          path = 'src/server/video_service.rs'
+          src = open(path, encoding='utf-8').read()
+          old = (
+              '    let scale_soft = '
+              'hbb_common::config::option2bool(SCALE_SOFT, &Config::get_option(SCALE_SOFT));\n'
+          )
+          new = (
+              '    // rdgen: keep the native resolution for the software encoders\n'
+              '    let _scale_soft_option = '
+              'hbb_common::config::option2bool(SCALE_SOFT, &Config::get_option(SCALE_SOFT));\n'
+              '    let scale_soft = false;\n'
+          )
+          if 'let scale_soft = false;' in src:
+              print('OK: the half scale is already disabled')
+              sys.exit(0)
+          if old not in src:
+              print('::error::the scale_soft anchor is missing in video_service.rs')
+              sys.exit(1)
+          open(path, 'w', encoding='utf-8', newline='\n').write(src.replace(old, new, 1))
+          print('OK: the software encoders now keep the native resolution')
+          PY
+
+          # Fail the build if the patch did not land, instead of silently
+          # shipping an APK that still halves the resolution.
+          if grep -q 'let scale_soft = false;' src/server/video_service.rs; then
+            echo "OK: half scale is disabled in video_service.rs"
+          else
+            echo "::error::the half scale patch did not land in video_service.rs"
+            exit 1
+          fi
+
       - name: Install vcpkg dependencies
         run: |
           case ${{ matrix.job.target }} in
