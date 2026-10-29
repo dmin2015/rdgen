@@ -623,6 +623,76 @@ jobs:
           sed -i '/ic_launcher_background/d' ./flutter/android/app/src/main/res/values/colors.xml
       ##########################################################
 
+      - name: "Android: bake the custom client config into the library"
+        # flutter/lib/models/native_model.dart hands an empty customClientConfig
+        # to mainInit(), so on Android read_custom_client() is never reached and
+        # the assets/custom_.txt inside the APK is never read. That is why the
+        # "Set Permanent Password" and the Default/Override settings of the form
+        # had no effect on the Android client.
+        #
+        # The generated config is written to assets here and pulled into the
+        # library with include_str!, then applied when the process starts. The
+        # "allow custom.txt" step above already removed the RustDesk signature
+        # check, which rdgen configs could never satisfy.
+        if: env.custom != ''
+        env:
+          RDGEN_CUSTOM: ${{ env.custom }}
+        run: |
+          mkdir -p ./flutter/assets
+          printf '%s' "$RDGEN_CUSTOM" > ./flutter/assets/custom_.txt
+          echo "baked custom config bytes: $(wc -c < ./flutter/assets/custom_.txt)"
+
+          python3 - <<'PY'
+          import sys
+
+          path = 'src/flutter_ffi.rs'
+          src = open(path, encoding='utf-8').read()
+          if 'rdgen: apply the baked custom client config' in src:
+              print('OK: the baked config is already applied')
+              sys.exit(0)
+          old = (
+              '    if custom_client_config.is_empty() {\n'
+              '        crate::load_custom_client();\n'
+              '    } else {\n'
+              '        crate::read_custom_client(custom_client_config);\n'
+              '    }\n'
+          )
+          new = (
+              '    if custom_client_config.is_empty() {\n'
+              '        crate::load_custom_client();\n'
+              '        // rdgen: apply the baked custom client config (permanent password,\n'
+              '        // default/override settings); the flutter side passes an empty one\n'
+              '        #[cfg(target_os = "android")]\n'
+              '        {\n'
+              '            let baked_config =\n'
+              '                include_str!("../flutter/assets/custom_.txt").trim();\n'
+              '            if !baked_config.is_empty() {\n'
+              '                crate::read_custom_client(baked_config);\n'
+              '            }\n'
+              '        }\n'
+              '    } else {\n'
+              '        crate::read_custom_client(custom_client_config);\n'
+              '    }\n'
+          )
+          if old not in src:
+              print('::error::the initialize() anchor is missing in src/flutter_ffi.rs')
+              sys.exit(1)
+          open(path, 'w', encoding='utf-8', newline='\n').write(src.replace(old, new, 1))
+          print('OK: the baked custom client config is applied on startup')
+          PY
+
+          # "allow custom.txt" (continue-on-error) strips the signature check; if
+          # it silently stopped matching, the config would be dropped at runtime.
+          if grep -q 'sign::verify(&data, &pk)' src/common.rs; then
+            echo "::error::src/common.rs still verifies the custom client signature, the baked config would be ignored"
+            exit 1
+          fi
+          if grep -q 'rdgen: apply the baked custom client config' src/flutter_ffi.rs; then
+            echo "OK: flutter_ffi.rs applies the baked config"
+          else
+            echo "::error::the baked config hook did not land in src/flutter_ffi.rs"
+            exit 1
+          fi
       - name: Build rustdesk lib
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
