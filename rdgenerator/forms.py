@@ -36,10 +36,12 @@ class GenerateForm(forms.Form):
         ('default', 'Default (official behaviour)'),
         ('swH264', 'Software H.264 MediaCodec (OMX.google.h264.encoder) instead of VP8'),
     ], initial='default')
-    #Android MediaCodec profile fix for the controlled device (Android builds only)
-    androidMediaCodecProfile = forms.ChoiceField(label="Android MediaCodec profile fix", choices=[
-        ('default', 'Default (official behaviour)'),
-        ('skipProfile', 'Skip the MediaCodec profile/level keys (keeps the Rockchip hardware encoder)'),
+    #Keep the native capture resolution on the controlled device (Android builds only).
+    #The field name and the 'skipProfile' value are kept for compatibility with the
+    #secrets path; the option no longer patches ffmpeg.
+    androidMediaCodecProfile = forms.ChoiceField(label="Android native capture resolution", choices=[
+        ('default', 'Default (official behaviour: the software encoders capture at half resolution)'),
+        ('skipProfile', 'Keep the native resolution (no half scale, fixes the blurry picture)'),
     ], initial='default')
 
     #Custom Server

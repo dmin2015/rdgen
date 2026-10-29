@@ -214,75 +214,27 @@ jobs:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
-      # The ffmpeg MediaCodec profile patch has to be installed *before* the
-      # vcpkg dependencies are built: vcpkg applies the patches listed in
-      # res/vcpkg/ffmpeg/portfile.cmake while it builds ffmpeg, so a patch
-      # that is added afterwards would never reach the compiled library.
-      - name: Checkout rdgen patches for the ffmpeg build
-        if: env.androidMediaCodecProfile == 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.ref_name }}
-          path: rdgen-src
-          clean: false
-          sparse-checkout: |
-            .github/patches
-
-      - name: "Android MediaCodec fixes (ffmpeg: skip the profile, keep the Rockchip frame size)"
-        # The Rockchip AVC encoder (OMX.rk.video_encoder.avc) of the RK3566
-        # boxes rejects every explicit profile. ffmpeg always writes one
-        # because the hwcodec crate hardcodes FF_PROFILE_H264_HIGH, so the
-        # configure() call fails and RustDesk falls back to VP8 with a halved
-        # resolution. This step installs an ffmpeg patch that skips the
-        # profile/level keys for the encoders that refuse them.
-        #
-        # A second patch keeps the frame size of those encoders unaligned.
-        # Aligning 1366 to 64 makes ffmpeg install the h264_metadata crop
-        # filter, and that filter has to parse the SPS - which the Rockchip one
-        # does not survive (log2_max_pic_order_cnt_lsb_minus4 = 13). Without
-        # the crop no filter is added and the packets pass through.
-        #
-        # Both have to run before "Install vcpkg dependencies", because vcpkg
-        # applies the patches of the portfile while it builds ffmpeg.
+      # The Android client never receives the custom client configuration:
+      # flutter/lib/models/native_model.dart calls mainInit() with a hard-coded
+      # empty customClientConfig, so read_custom_client() is skipped and the
+      # Default/Override settings of the rdgen form have no effect on Android.
+      # That means the user cannot turn off
+      # "enable-android-software-encoding-half-scale" from the form, and the
+      # software encoders keep capturing at half resolution (1366x768 drops to
+      # 683x384), which is exactly what makes a remote session look blurry.
+      #
+      # scale_soft is only used by "half_scale = !hardware && scale_soft", so
+      # pinning it to false keeps the native screen size for both the hardware
+      # and the software encoders.
+      #
+      # This is the only change that actually fixes the blurry picture. The two
+      # ffmpeg MediaCodec patches that used to live here (skip the explicit
+      # profile / keep the Rockchip frame size unaligned) were dropped: on the
+      # RK3566 boxes the hardware encoder still ends up unused and the session
+      # still runs on VP8, so the patches changed nothing but the build time.
+      - name: "Android: keep the native capture resolution (no half scale)"
         if: env.androidMediaCodecProfile == 'true'
         run: |
-          PATCH_FILE=""
-          for candidate in \
-            "rdgen-src/.github/patches/android_mediacodec_skip_profile.py" \
-            ".github/patches/android_mediacodec_skip_profile.py"; do
-            if [ -f "$candidate" ]; then PATCH_FILE="$candidate"; break; fi
-          done
-          if [ -z "$PATCH_FILE" ]; then
-            echo "::error::android_mediacodec_skip_profile.py not found in the workspace"
-            exit 1
-          fi
-          python3 "$PATCH_FILE"
-
-          ALIGN_FILE=""
-          for candidate in \
-            "rdgen-src/.github/patches/android_mediacodec_rk_align.py" \
-            ".github/patches/android_mediacodec_rk_align.py"; do
-            if [ -f "$candidate" ]; then ALIGN_FILE="$candidate"; break; fi
-          done
-          if [ -z "$ALIGN_FILE" ]; then
-            echo "::error::android_mediacodec_rk_align.py not found in the workspace"
-            exit 1
-          fi
-          python3 "$ALIGN_FILE"
-
-          # The Android client never receives the custom client configuration:
-          # flutter/lib/models/native_model.dart calls mainInit() with a
-          # hard-coded empty customClientConfig, so read_custom_client() is
-          # skipped and the Default/Override settings of the rdgen form have no
-          # effect on Android. That means the user cannot turn off
-          # "enable-android-software-encoding-half-scale" from the form, and the
-          # software encoders keep capturing at half resolution, which is what
-          # makes a remote session look blurry.
-          #
-          # scale_soft is only used by "half_scale = !hardware && scale_soft",
-          # so pinning it to false keeps the native screen size without
-          # touching the hardware encoder path.
           python3 - <<'PY'
           import sys
 
@@ -308,7 +260,7 @@ jobs:
           print('OK: the software encoders now keep the native resolution')
           PY
 
-          # Fail the build if the patch did not land, instead of silently
+          # Fail the build if the change did not land, instead of silently
           # shipping an APK that still halves the resolution.
           if grep -q 'let scale_soft = false;' src/server/video_service.rs; then
             echo "OK: half scale is disabled in video_service.rs"
@@ -639,60 +591,14 @@ jobs:
           fi
 
           if [ "${ANDROID_MEDIACODEC_PROFILE:-}" = "true" ]; then
-            # The ffmpeg patch has to be present in the vcpkg port, otherwise
-            # the Rockchip hardware encoder keeps failing to configure and the
-            # remote picture stays blurry.
-            PATCH_FILE="res/vcpkg/ffmpeg/patch/0013-android-mediacodec-skip-profile.patch"
-            if [ -f "$PATCH_FILE" ]; then
-              echo "OK: the ffmpeg MediaCodec profile patch is present"
+            # The half scale is the only thing that actually fixes the blurry
+            # picture, so make sure it really is disabled in the source tree.
+            # The ffmpeg MediaCodec patches that used to be verified here are
+            # gone: they never got the Rockchip encoder into a working state.
+            if grep -q 'let scale_soft = false;' src/server/video_service.rs; then
+              echo "OK: the half scale is disabled in video_service.rs"
             else
-              echo "::error::the MediaCodec profile option was requested but $PATCH_FILE is NOT in the source tree"
-              failed=1
-            fi
-            if grep -q "patch/0013-android-mediacodec-skip-profile.patch" res/vcpkg/ffmpeg/portfile.cmake; then
-              echo "OK: the ffmpeg MediaCodec profile patch is registered in portfile.cmake"
-            else
-              echo "::error::the MediaCodec profile option was requested but the patch is NOT registered in res/vcpkg/ffmpeg/portfile.cmake"
-              failed=1
-            fi
-            # The patch has to keep the guard that skips the profile/level
-            # keys only for the encoders that refuse them.
-            if grep -q "ff_AMediaCodec_refuses_profile" "$PATCH_FILE" 2>/dev/null; then
-              echo "OK: the ffmpeg patch skips the profile for the encoders that refuse it"
-            else
-              echo "::error::the MediaCodec profile option was requested but the ffmpeg patch does not contain the profile guard"
-              failed=1
-            fi
-
-            # 0014 keeps the frame size of the Rockchip encoder unaligned so
-            # that ffmpeg never installs the h264_metadata crop filter, which
-            # cannot parse the Rockchip SPS.
-            ALIGN_FILE="res/vcpkg/ffmpeg/patch/0014-android-mediacodec-rk-skip-align.patch"
-            if [ -f "$ALIGN_FILE" ]; then
-              echo "OK: the ffmpeg Rockchip alignment patch is present"
-            else
-              echo "::error::the MediaCodec profile option was requested but $ALIGN_FILE is NOT in the source tree"
-              failed=1
-            fi
-            if grep -q "patch/0014-android-mediacodec-rk-skip-align.patch" res/vcpkg/ffmpeg/portfile.cmake; then
-              echo "OK: the ffmpeg Rockchip alignment patch is registered in portfile.cmake"
-            else
-              echo "::error::the MediaCodec profile option was requested but the alignment patch is NOT registered in res/vcpkg/ffmpeg/portfile.cmake"
-              failed=1
-            fi
-            # It has to be applied after 0013, which in turn needs the profile
-            # guard to exist.
-            if grep -q "align = 2;" "$ALIGN_FILE" 2>/dev/null && \
-               grep -q "OMX\.rk\." "$ALIGN_FILE" 2>/dev/null; then
-              echo "OK: the alignment patch skips the alignment for the Rockchip encoders"
-            else
-              echo "::error::the MediaCodec profile option was requested but the alignment patch does not skip the Rockchip alignment"
-              failed=1
-            fi
-            if awk '/patch\/0013-android-mediacodec-skip-profile.patch/{a=NR} /patch\/0014-android-mediacodec-rk-skip-align.patch/{b=NR} END{exit !(a && b && a<b)}' res/vcpkg/ffmpeg/portfile.cmake; then
-              echo "OK: 0014 is applied after 0013 in portfile.cmake"
-            else
-              echo "::error::0014 is NOT listed after 0013 in res/vcpkg/ffmpeg/portfile.cmake"
+              echo "::error::the native resolution option was requested but half_scale is still active in src/server/video_service.rs"
               failed=1
             fi
           fi
@@ -724,20 +630,6 @@ jobs:
         run: |
           rustup target add ${{ matrix.job.target }}
           cargo install cargo-ndk --version ${{ env.CARGO_NDK_VERSION }} --locked
-          # The hwcodec crate links the static ffmpeg libraries of vcpkg, but
-          # its build script only declares "rerun-if-changed" for its own
-          # sources. When the ffmpeg port is patched, the restored cargo cache
-          # still holds a libhwcodec.a that was linked against the old
-          # libavcodec.a, so the new ffmpeg code would silently be missing
-          # from the APK. Dropping the build artifacts of hwcodec forces
-          # cargo to run its build script again and to link the ffmpeg
-          # libraries that were just built.
-          if [ "${{ env.androidMediaCodecProfile }}" = "true" ]; then
-            echo "Dropping the cached hwcodec build artifacts so that the patched ffmpeg is linked in"
-            rm -rf ./target/${{ matrix.job.target }}/release/build/hwcodec-*
-            rm -rf ./target/${{ matrix.job.target }}/release/deps/libhwcodec*
-            rm -rf ./target/${{ matrix.job.target }}/release/.fingerprint/hwcodec-*
-          fi
           case ${{ matrix.job.target }} in
             aarch64-linux-android)
             ./flutter/ndk_arm64.sh
