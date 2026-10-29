@@ -229,7 +229,7 @@ jobs:
           sparse-checkout: |
             .github/patches
 
-      - name: Android MediaCodec profile fix (ffmpeg, keeps the Rockchip hardware encoder)
+      - name: "Android MediaCodec fixes (ffmpeg: skip the profile, keep the Rockchip frame size)"
         # The Rockchip AVC encoder (OMX.rk.video_encoder.avc) of the RK3566
         # boxes rejects every explicit profile. ffmpeg always writes one
         # because the hwcodec crate hardcodes FF_PROFILE_H264_HIGH, so the
@@ -237,7 +237,13 @@ jobs:
         # resolution. This step installs an ffmpeg patch that skips the
         # profile/level keys for the encoders that refuse them.
         #
-        # It has to run before "Install vcpkg dependencies", because vcpkg
+        # A second patch keeps the frame size of those encoders unaligned.
+        # Aligning 1366 to 64 makes ffmpeg install the h264_metadata crop
+        # filter, and that filter has to parse the SPS - which the Rockchip one
+        # does not survive (log2_max_pic_order_cnt_lsb_minus4 = 13). Without
+        # the crop no filter is added and the packets pass through.
+        #
+        # Both have to run before "Install vcpkg dependencies", because vcpkg
         # applies the patches of the portfile while it builds ffmpeg.
         if: env.androidMediaCodecProfile == 'true'
         run: |
@@ -252,6 +258,18 @@ jobs:
             exit 1
           fi
           python3 "$PATCH_FILE"
+
+          ALIGN_FILE=""
+          for candidate in \
+            "rdgen-src/.github/patches/android_mediacodec_rk_align.py" \
+            ".github/patches/android_mediacodec_rk_align.py"; do
+            if [ -f "$candidate" ]; then ALIGN_FILE="$candidate"; break; fi
+          done
+          if [ -z "$ALIGN_FILE" ]; then
+            echo "::error::android_mediacodec_rk_align.py not found in the workspace"
+            exit 1
+          fi
+          python3 "$ALIGN_FILE"
 
       - name: Install vcpkg dependencies
         run: |
@@ -597,6 +615,38 @@ jobs:
               echo "OK: the ffmpeg patch skips the profile for the encoders that refuse it"
             else
               echo "::error::the MediaCodec profile option was requested but the ffmpeg patch does not contain the profile guard"
+              failed=1
+            fi
+
+            # 0014 keeps the frame size of the Rockchip encoder unaligned so
+            # that ffmpeg never installs the h264_metadata crop filter, which
+            # cannot parse the Rockchip SPS.
+            ALIGN_FILE="res/vcpkg/ffmpeg/patch/0014-android-mediacodec-rk-skip-align.patch"
+            if [ -f "$ALIGN_FILE" ]; then
+              echo "OK: the ffmpeg Rockchip alignment patch is present"
+            else
+              echo "::error::the MediaCodec profile option was requested but $ALIGN_FILE is NOT in the source tree"
+              failed=1
+            fi
+            if grep -q "patch/0014-android-mediacodec-rk-skip-align.patch" res/vcpkg/ffmpeg/portfile.cmake; then
+              echo "OK: the ffmpeg Rockchip alignment patch is registered in portfile.cmake"
+            else
+              echo "::error::the MediaCodec profile option was requested but the alignment patch is NOT registered in res/vcpkg/ffmpeg/portfile.cmake"
+              failed=1
+            fi
+            # It has to be applied after 0013, which in turn needs the profile
+            # guard to exist.
+            if grep -q "align = 2;" "$ALIGN_FILE" 2>/dev/null && \
+               grep -q "OMX\.rk\." "$ALIGN_FILE" 2>/dev/null; then
+              echo "OK: the alignment patch skips the alignment for the Rockchip encoders"
+            else
+              echo "::error::the MediaCodec profile option was requested but the alignment patch does not skip the Rockchip alignment"
+              failed=1
+            fi
+            if awk '/patch\/0013-android-mediacodec-skip-profile.patch/{a=NR} /patch\/0014-android-mediacodec-rk-skip-align.patch/{b=NR} END{exit !(a && b && a<b)}' res/vcpkg/ffmpeg/portfile.cmake; then
+              echo "OK: 0014 is applied after 0013 in portfile.cmake"
+            else
+              echo "::error::0014 is NOT listed after 0013 in res/vcpkg/ffmpeg/portfile.cmake"
               failed=1
             fi
           fi
